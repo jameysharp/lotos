@@ -44,9 +44,7 @@ sequenceB a b = Sequence a b
 
 interleavingB :: Behavior -> Behavior -> Behavior
 interleavingB Exit b = b
-interleavingB Stop b = Stop
 interleavingB a Exit = a
-interleavingB a Stop = Stop
 interleavingB a b = Interleaving a b
 
 parallelB :: [Gate] -> Behavior -> Behavior -> Behavior
