@@ -33,16 +33,19 @@ sequenceB a Exit = a
 sequenceB a b = Sequence a b
 
 parallelB :: [Gate] -> Behavior -> Behavior -> Behavior
-parallelB sync b1 b2 = maybe Stop flatten $ parallel' sync b1 b2
+parallelB sync b1 b2 = maybe Stop flatten $ parallel' (`elem` sync) b1 b2
 
-parallel' :: [Gate] -> Behavior -> Behavior -> Maybe ([Gate], [Gate], Behavior)
+synchronizationB :: Behavior -> Behavior -> Behavior
+synchronizationB b1 b2 = maybe Stop flatten $ parallel' (const True) b1 b2
+
+parallel' :: (Gate -> Bool) -> Behavior -> Behavior -> Maybe ([Gate], [Gate], Behavior)
 parallel' sync (Action g1 b1) b2
-    | g1 `notElem` sync = do
+    | not (sync g1) = do
         (l, r, b) <- parallel' sync b1 b2
         return (g1 : l, r, b)
     | b2 == Exit || b2 == Stop = Nothing -- gate in sync can't match
 parallel' sync b1 (Action g2 b2)
-    | g2 `notElem` sync = do
+    | not (sync g2) = do
         (l, r, b) <- parallel' sync b1 b2
         return (l, g2 : r, b)
     | b1 == Exit || b1 == Stop = Nothing -- gate in sync can't match
