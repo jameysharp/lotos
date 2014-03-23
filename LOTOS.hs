@@ -1,5 +1,6 @@
 module LOTOS where
 
+import Data.List
 import Data.Maybe
 
 type Gate = String
@@ -17,6 +18,22 @@ data Behavior
     | Sequence Behavior Behavior
     | Preempt Behavior Behavior
     deriving (Show, Eq)
+
+hideB :: [Gate] -> Behavior -> Behavior
+hideB gates (Action g b)
+    | g `elem` gates = hideB gates b
+    | otherwise = Action g $ hideB gates b
+hideB gates (Choice b1 b2) = Choice (hideB gates b1) (hideB gates b2)
+hideB gates b@(Parallel sync b1 b2)
+    | not $ any (`elem` gates) sync = Parallel sync (hideB gates b1) (hideB gates b2)
+hideB gates (Interleaving b1 b2) = Interleaving (hideB gates b1) (hideB gates b2)
+hideB gates (Hide gates' b) = hideB (gates `union` gates') b
+hideB gates b@(Process gates') | not $ any (`elem` gates) gates' = b
+hideB _ Stop = Stop
+hideB _ Exit = Exit
+hideB gates (Sequence b1 b2) = Sequence (hideB gates b1) (hideB gates b2)
+hideB gates (Preempt b1 b2) = Preempt (hideB gates b1) (hideB gates b2)
+hideB gates b = Hide gates b
 
 sequenceB :: Behavior -> Behavior -> Behavior
 sequenceB (Action g b1) b2 = Action g (sequenceB b1 b2)
@@ -64,3 +81,10 @@ parallel' _ a b = error $ "what to do with parallel' (" ++ show a ++ ") (" ++ sh
 
 flatten :: (Behavior, Behavior, Behavior) -> Behavior
 flatten (l, r, b) = sequenceB (interleavingB l r) b
+
+sample :: Behavior
+sample = hideB class_gates $ parallelB class_gates os_spec dev_spec
+    where
+    class_gates = ["class.send", "class.ok", "class.err"]
+    os_spec = (Action "os.req" (Action "class.send" (Choice (Action "class.ok" (Action "os.complete" Exit)) (Action "class.err" (Action "os.failed" Exit)))))
+    dev_spec = (Action "dev.enqueue" (Action "class.send" (Action "dev.irq" (Choice (Action "class.ok" Exit) (Action "class.err" Exit)))))
