@@ -18,19 +18,19 @@ data Behavior
     | Preempt Behavior Behavior
     deriving (Show, Eq)
 
-interleavingB :: Behavior -> Behavior -> Behavior
-interleavingB Exit b = b
-interleavingB Stop b = Stop
-interleavingB a Exit = a
-interleavingB a Stop = Stop
-interleavingB a b = Interleaving a b
-
 sequenceB :: Behavior -> Behavior -> Behavior
 sequenceB (Action g b1) b2 = Action g (sequenceB b1 b2)
 sequenceB Stop b = Stop
 sequenceB Exit b = b
 sequenceB a Exit = a
 sequenceB a b = Sequence a b
+
+interleavingB :: Behavior -> Behavior -> Behavior
+interleavingB Exit b = b
+interleavingB Stop b = Stop
+interleavingB a Exit = a
+interleavingB a Stop = Stop
+interleavingB a b = Interleaving a b
 
 parallelB :: [Gate] -> Behavior -> Behavior -> Behavior
 parallelB sync b1 b2 = maybe Stop flatten $ parallel' (`elem` sync) b1 b2
