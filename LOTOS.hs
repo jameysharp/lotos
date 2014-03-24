@@ -1,26 +1,32 @@
+{-# LANGUAGE DeriveDataTypeable #-}
 module LOTOS where
 
 import Control.Monad
+import Data.Data
 import Data.List
 import Data.Maybe
+import Data.Generics.Uniplate.Data
+import Data.Typeable
 
 type Gate = String
 
 type Name = String
 
 newtype Expression = Variable Name
-    deriving Eq
+    deriving (Eq, Data, Typeable)
 
 instance Show Expression where
     show (Variable name) = name
 
 data ExitExpression = ExitExpression Expression | ExitAny
+    deriving (Data, Typeable)
 
 instance Show ExitExpression where
     show ExitAny = "any"
     show (ExitExpression expr) = show expr
 
 data GateValue = ValueDeclaration Expression | VariableDeclaration Name
+    deriving (Data, Typeable)
 
 instance Show GateValue where
     show (ValueDeclaration expr) = '!' : show expr
@@ -38,6 +44,7 @@ data Behavior
     | Exit [ExitExpression]
     | Sequence Behavior [Name] Behavior
     | Preempt Behavior Behavior
+    deriving (Data, Typeable)
 
 instance Show Behavior where
     show Stop = "stop"
@@ -64,7 +71,9 @@ isTerminalBehavior _ = False
 
 rename :: [(Name, Expression)] -> Behavior -> Behavior
 rename [] b = b
--- FIXME: actually renaming things is not yet implemented
+rename binding b = transformBi replace b
+    where
+    replace old@(Variable name) = fromMaybe old $ lookup name binding
 
 hideB :: [Gate] -> Behavior -> Behavior
 hideB gates (Action g vs b)
@@ -154,4 +163,4 @@ sample = hideB class_gates $ parallelB class_gates os_spec dev_spec
     where
     class_gates = ["class.send", "class.ok", "class.err"]
     os_spec = (Action "os.req" [VariableDeclaration "msg"] (Action "class.send" [ValueDeclaration $ Variable "msg"] (Choice (Action "class.ok" [] (Action "os.complete" [] $ Exit [])) (Action "class.err" [VariableDeclaration "err"] (Action "os.failed" [ValueDeclaration $ Variable "err"] $ Exit [])))))
-    dev_spec = (Action "dev.enqueue" [VariableDeclaration "msg"] (Action "class.send" [ValueDeclaration $ Variable "msg"] (Action "dev.irq" [VariableDeclaration "err"] (Choice (Action "class.ok" [] $ Exit []) (Action "class.err" [ValueDeclaration $ Variable "err"] $ Exit [])))))
+    dev_spec = (Action "dev.enqueue" [VariableDeclaration "msg"] (Action "class.send" [ValueDeclaration $ Variable "msg"] (Action "dev.irq" [VariableDeclaration "status"] (Choice (Action "class.ok" [] $ Exit []) (Action "class.err" [ValueDeclaration $ Variable "status"] $ Exit [])))))
