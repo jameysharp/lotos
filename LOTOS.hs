@@ -62,6 +62,10 @@ isTerminalBehavior (Exit _) = True
 isTerminalBehavior Stop = True
 isTerminalBehavior _ = False
 
+rename :: [(Name, Expression)] -> Behavior -> Behavior
+rename [] b = b
+-- FIXME: actually renaming things is not yet implemented
+
 hideB :: [Gate] -> Behavior -> Behavior
 hideB gates (Action g vs b)
     | g `elem` gates = hideB gates b
@@ -81,15 +85,9 @@ hideB gates b = Hide gates b
 sequenceB :: Behavior -> [Name] -> Behavior -> Behavior
 sequenceB (Action g vs b1) names b2 = Action g vs (sequenceB b1 names b2)
 sequenceB Stop _ _ = Stop
-sequenceB (Exit vs) names b | null [() | ExitAny <- vs] = sequenceRename vs names b
+sequenceB (Exit vs) names b | null [() | ExitAny <- vs] = rename [(old, new) | (ExitExpression new, old) <- zip vs names, Variable old /= new ] b
 sequenceB a [] (Exit []) = a
 sequenceB a names b = Sequence a names b
-
-sequenceRename :: [ExitExpression] -> [Name] -> Behavior -> Behavior
-sequenceRename exprs names | null binding = id
-    -- FIXME: actually renaming things is not yet implemented
-    where
-    binding = [(old, new) | (ExitExpression new, old) <- zip exprs names, Variable old /= new ]
 
 interleavingB :: Behavior -> Behavior -> Behavior
 interleavingB (Exit v1) (Exit v2) | length v1 == length v2 && all isJust merged = Exit $ map fromJust merged
@@ -123,7 +121,8 @@ parallel' sync (Action g1 v1 b1) (Action g2 v2 b2)
     | g1 == g2 = do
         guard $ length v1 == length v2 -- sync gates must have same attribute types
         let freshNames = getFreshNames v1 v2
-        rest <- parallel' sync (rename freshNames v1 b1) (rename freshNames v2 b2)
+        let push decls = rename [(old, Variable new) | (VariableDeclaration old, new) <- zip decls freshNames, old /= new ]
+        rest <- parallel' sync (push v1 b1) (push v2 b2)
         let l = Exit $ map exitExpression v1
         let r = Exit $ map exitExpression v2
         return (l, r, freshNames, Action g1 (map (ValueDeclaration . Variable) freshNames) $ flatten rest)
@@ -146,12 +145,6 @@ getFreshNames (VariableDeclaration name : v1) (_ : v2) = name : getFreshNames v1
 getFreshNames (_ : v1) (VariableDeclaration name : v2) = name : getFreshNames v1 v2
 getFreshNames (ValueDeclaration (Variable name) : v1) (_ : v2) = name : getFreshNames v1 v2
 getFreshNames v1 v2 = error $ "getFreshNames: " ++ show v1 ++ " " ++ show v2
-
-rename :: [Name] -> [GateValue] -> Behavior -> Behavior
-rename freshNames decls | null binding = id
-    -- FIXME: actually renaming things is not yet implemented
-    where
-    binding = [(old, Variable new) | (VariableDeclaration old, new) <- zip decls freshNames, old /= new ]
 
 flatten :: (Behavior, Behavior, [Name], Behavior) -> Behavior
 flatten (l, r, names, b) = sequenceB (interleavingB l r) names b
