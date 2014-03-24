@@ -9,13 +9,22 @@ type Gate = String
 type Name = String
 
 newtype Expression = Variable Name
-    deriving (Show, Eq)
+    deriving Eq
+
+instance Show Expression where
+    show (Variable name) = name
 
 data ExitExpression = ExitExpression Expression | ExitAny
-    deriving Show
+
+instance Show ExitExpression where
+    show ExitAny = "any"
+    show (ExitExpression expr) = show expr
 
 data GateValue = ValueDeclaration Expression | VariableDeclaration Name
-    deriving Show
+
+instance Show GateValue where
+    show (ValueDeclaration expr) = '!' : show expr
+    show (VariableDeclaration name) = '?' : name
 
 data Behavior
     = Stop
