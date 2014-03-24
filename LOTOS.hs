@@ -34,11 +34,28 @@ data Behavior
     | Interleaving Behavior Behavior
     | Synchronization Behavior Behavior
     | Hide [Gate] Behavior
-    | Process [Gate]
+    | Process Name [Gate]
     | Exit [ExitExpression]
     | Sequence Behavior [Name] Behavior
     | Preempt Behavior Behavior
-    deriving Show
+
+instance Show Behavior where
+    show Stop = "stop"
+    show (Action g vs b) = unwords (g : map show vs) ++ "; " ++ show b
+    show (Choice b1 b2) = "(" ++ show b1 ++ ") [] (" ++ show b2 ++ ")"
+    show (Parallel gs b1 b2) = "(" ++ show b1 ++ ") |" ++ show gs ++ "| (" ++ show b2 ++ ")"
+    show (Interleaving b1 b2) = "(" ++ show b1 ++ ") ||| (" ++ show b2 ++ ")"
+    show (Synchronization b1 b2) = "(" ++ show b1 ++ ") || (" ++ show b2 ++ ")"
+    show (Hide gs b) = unwords ("hide" : gs ++ ["in", show b])
+    show (Process name []) = name
+    show (Process name gs) = name ++ " " ++ show gs
+    show (Exit []) = "exit"
+    show (Exit gs) = "exit(" ++ unwords (map show gs) ++ ")"
+    show (Sequence b1 accept b2) = "(" ++ show b1 ++ ") >> " ++
+        case accept of
+        [] -> "(" ++ show b2 ++ ")"
+        _ -> unwords ("accept" : accept ++ ["in", "(" ++ show b2 ++ ")"])
+    show (Preempt b1 b2) = "(" ++ show b1 ++ ") |> (" ++ show b2 ++ ")"
 
 isTerminalBehavior :: Behavior -> Bool
 isTerminalBehavior (Exit _) = True
@@ -54,7 +71,7 @@ hideB gates b@(Parallel sync b1 b2)
     | not $ any (`elem` gates) sync = Parallel sync (hideB gates b1) (hideB gates b2)
 hideB gates (Interleaving b1 b2) = Interleaving (hideB gates b1) (hideB gates b2)
 hideB gates (Hide gates' b) = hideB (gates `union` gates') b
-hideB gates b@(Process gates') | not $ any (`elem` gates) gates' = b
+hideB gates b@(Process name gates') | not $ any (`elem` gates) gates' = b
 hideB _ Stop = Stop
 hideB _ (Exit exprs) = Exit exprs
 hideB gates (Sequence b1 names b2) = Sequence (hideB gates b1) names (hideB gates b2)
