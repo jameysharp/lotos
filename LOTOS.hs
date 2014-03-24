@@ -101,14 +101,13 @@ sequenceB a [] (Exit []) = a
 sequenceB a names b = Sequence a names b
 
 interleavingB :: Behavior -> Behavior -> Behavior
-interleavingB (Exit v1) (Exit v2) | length v1 == length v2 && all isJust merged = Exit $ map fromJust merged
+interleavingB (Exit v1) (Exit v2) | length v1 == length v2, Just merged <- sequence $ zipWith exitMerge v1 v2 = Exit merged
     where
-    merged = zipWith exitMerge v1 v2
     exitMerge ExitAny b = Just b
     exitMerge a ExitAny = Just a
     exitMerge _ _ = Nothing
-interleavingB (Exit []) b = b
-interleavingB a (Exit []) = a
+interleavingB (Exit v) b | all (== ExitAny) v = b
+interleavingB a (Exit v) | all (== ExitAny) v = a
 interleavingB a b = Interleaving a b
 
 parallelB :: [Gate] -> Behavior -> Behavior -> Behavior
