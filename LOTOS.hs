@@ -1,6 +1,7 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 module LOTOS where
 
+import Control.Arrow
 import Control.Monad
 import Data.Data
 import Data.List
@@ -8,6 +9,7 @@ import qualified Data.Map as Map
 import Data.Maybe
 import Data.Generics.Str
 import Data.Generics.Uniplate.Data
+import qualified Data.Set as Set
 import Data.Typeable
 
 type Gate = String
@@ -73,42 +75,69 @@ isTerminalBehavior _ = False
 
 rename :: [(Name, Expression)] -> Behavior -> Behavior
 rename [] b = b
+-- FIXME: handle name shadowing
 rename binding b = transformBi replace b
     where
     replace old@(Variable name) = fromMaybe old $ lookup name binding
 
-hideB :: [Gate] -> Behavior -> Behavior
-hideB gates (Action g vs b)
-    | g `elem` gates = hideB gates b
-    | otherwise = Action g vs $ hideB gates b
-hideB gates (Choice b1 b2) = Choice (hideB gates b1) (hideB gates b2)
-hideB gates b@(Parallel sync b1 b2)
-    | not $ any (`elem` gates) sync = Parallel sync (hideB gates b1) (hideB gates b2)
-hideB gates (Interleaving b1 b2) = Interleaving (hideB gates b1) (hideB gates b2)
-hideB gates (Hide gates' b) = hideB (gates `union` gates') b
-hideB gates b@(Process name gates') | not $ any (`elem` gates) gates' = b
-hideB _ Stop = Stop
-hideB _ (Exit exprs) = Exit exprs
-hideB gates (Sequence b1 names b2) = Sequence (hideB gates b1) names (hideB gates b2)
-hideB gates (Preempt b1 b2) = Preempt (hideB gates b1) (hideB gates b2)
-hideB gates b = Hide gates b
+simplify :: Behavior -> Behavior
+simplify = transform f
+    where
+    -- Note: If any rule introduces a constructor that appears in some rule's pattern, be sure to apply `f` recursively.
+    f (Sequence (Action g vs b1) names b2) = Action g vs $ f $ Sequence b1 names b2
+    f (Sequence Stop _ _) = Stop
+    f (Sequence (Exit vs) names b) | not (any (ExitAny ==) vs) = rename [(old, new) | (ExitExpression new, old) <- zip vs names, Variable old /= new ] b
+    f (Sequence b names (Exit vs)) = replaceExit b
+        where
+        replaceExit (Exit vs') =
+            let rebind (ExitExpression (Variable var)) | Just expr <- lookup var (zip names vs') = expr
+                -- XXX: Once Expression adds operators, check that we aren't using ExitAny as an operand
+                rebind e = e
+            in Exit $ map rebind vs
+        -- Don't replace Exits on the LHS of a nested Sequence.
+        replaceExit (Sequence a names b) = Sequence a names $ replaceExit b
+        replaceExit b = descend replaceExit b
 
-sequenceB :: Behavior -> [Name] -> Behavior -> Behavior
-sequenceB (Action g vs b1) names b2 = Action g vs (sequenceB b1 names b2)
-sequenceB Stop _ _ = Stop
-sequenceB (Exit vs) names b | null [() | ExitAny <- vs] = rename [(old, new) | (ExitExpression new, old) <- zip vs names, Variable old /= new ] b
-sequenceB a [] (Exit []) = a
-sequenceB a names b = Sequence a names b
+    f (Parallel sync b1 b2) = case Set.toList $ gatesFreeIn' (Set.fromList sync, Set.empty) [b1, b2] of
+        [] -> f $ Interleaving b1 b2
+        sync' -> Parallel sync' b1 b2
 
-interleavingB :: Behavior -> Behavior -> Behavior
-interleavingB (Exit v1) (Exit v2) | length v1 == length v2, Just merged <- sequence $ zipWith exitMerge v1 v2 = Exit merged
+    f (Synchronization (Exit v1) (Exit v2)) | Just merged <- unifyExits v1 v2 = Exit merged
+
+    f (Interleaving (Exit v1) (Exit v2)) | Just merged <- unifyExits v1 v2 = Exit merged
+    f (Interleaving (Exit v) b) | all (ExitAny ==) v = b
+    f (Interleaving a (Exit v)) | all (ExitAny ==) v = a
+
+    f (Hide gs b) = case Set.toList $ Set.fromList gs `gatesFreeIn` b of
+        [] -> b
+        gs' -> Hide gs' b
+
+    f b = b
+
+unifyExits :: [ExitExpression] -> [ExitExpression] -> Maybe [ExitExpression]
+unifyExits v1 v2 = sequence $ zipWith exitMerge v1 v2
     where
     exitMerge ExitAny b = Just b
     exitMerge a ExitAny = Just a
     exitMerge _ _ = Nothing
-interleavingB (Exit v) b | all (== ExitAny) v = b
-interleavingB a (Exit v) | all (== ExitAny) v = a
-interleavingB a b = Interleaving a b
+
+gatesFreeIn :: Set.Set Gate -> Behavior -> Set.Set Gate
+gatesFreeIn gates _ | Set.null gates = Set.empty
+gatesFreeIn gates (Action g _ b) = (if g `Set.member` gates then Set.insert g else id) $ gatesFreeIn (g `Set.delete` gates) b
+gatesFreeIn gates (Parallel gs b1 b2) = gatesFreeIn' ((uncurry Set.difference &&& uncurry Set.intersection) (gates, Set.fromList gs)) [b1, b2]
+gatesFreeIn gates (Hide gs b) = gatesFreeIn (gates `Set.difference` Set.fromList gs) b
+gatesFreeIn gates (Process _ gs) = Set.fromList gs `Set.intersection` gates
+gatesFreeIn gates b = gatesFreeIn' (gates, Set.empty) $ children b
+
+gatesFreeIn' :: (Set.Set Gate, Set.Set Gate) -> [Behavior] -> Set.Set Gate
+gatesFreeIn' start = snd . foldr (\ b (want, found) -> (Set.difference want &&& Set.union found) $ gatesFreeIn want b) start
+
+removeHiddenActions :: Behavior -> Behavior
+removeHiddenActions = removeAction []
+    where
+    removeAction gates (Action g _ b) | g `elem` gates = removeAction gates b
+    removeAction gates (Hide gates' b) = Hide gates' $ removeAction (gates `union` gates') b
+    removeAction gates b = descend (removeAction gates) b
 
 parallelB :: [Gate] -> Behavior -> Behavior -> Behavior
 parallelB sync b1 b2 = maybe Stop flatten $ parallel' (Parallel sync) (`elem` sync) b1 b2
@@ -156,7 +185,7 @@ getFreshNames (ValueDeclaration (Variable name) : v1) (_ : v2) = name : getFresh
 getFreshNames v1 v2 = error $ "getFreshNames: " ++ show v1 ++ " " ++ show v2
 
 flatten :: (Behavior, Behavior, [Name], Behavior) -> Behavior
-flatten (l, r, names, b) = sequenceB (interleavingB l r) names b
+flatten (l, r, names, b) = Sequence (Interleaving l r) names b
 
 uncontrolled :: [Gate] -> Behavior -> Behavior
 uncontrolled gates (Interleaving b1 b2)
@@ -176,7 +205,7 @@ extractInterleavedAction b1 b2 = do
         (b2', free) <- para (unify common) b2
         guard $ Map.null free
         return b2'
-    return $ Action g v $ interleavingB b1' b2'
+    return $ Action g v $ Interleaving b1' b2'
     where
     unify common (Exit exprs) [] = Just (unboundExit, exitBinding) where
         unboundExit = Exit [ case l of ExitAny -> r; _ -> ExitAny | (l, r) <- zip common exprs ]
@@ -209,7 +238,7 @@ commonExit :: [[ExitExpression]] -> Maybe [ExitExpression]
 commonExit exprs = if all same $ transpose exprs then Just (head exprs) else Nothing
 
 sample :: Behavior
-sample = uncontrolled ["os.req", "dev.irq"] $ hideB class_gates $ parallelB class_gates os_spec dev_spec
+sample = simplify $ removeHiddenActions $ uncontrolled ["os.req", "dev.irq"] $ Hide class_gates $ parallelB class_gates os_spec dev_spec
     where
     class_gates = ["class.send", "class.ok", "class.err"]
     os_spec = (Action "os.req" [VariableDeclaration "msg"] (Action "class.send" [ValueDeclaration $ Variable "msg"] (Choice (Action "class.ok" [] (Action "os.complete" [] $ Exit [])) (Action "class.err" [VariableDeclaration "err"] (Action "os.failed" [ValueDeclaration $ Variable "err"] $ Exit [])))))
