@@ -137,9 +137,15 @@ simplify = transform f
     f (Interleaving (Exit vs) b) | Just merged <- transformBiM (unifyExits vs) b = merged
     f (Interleaving a (Exit vs)) | Just merged <- transformBiM (unifyExits vs) a = merged
 
-    f (Hide gs b) = case Set.toList $ Set.fromList gs `gatesFreeIn` b of
+    f (Hide [] b) = b
+    f (Hide gs (Action g vs b)) | g `elem` gs = f $ Hide gs b
+    f (Hide gs b@(Synchronization{})) = hideB (Set.toList $ Set.fromList gs `gatesFreeIn` b) b
+    f (Hide gs b@(Parallel sync _ _)) = hideB (sync `intersect` gs) $ case gs \\ sync of
         [] -> b
-        gs' -> Hide gs' b
+        gs' -> f $ descend (f . Hide gs') b
+    f (Hide gs (Hide gs' b)) = f $ Hide (gs `union` gs') b
+    f (Hide gs b@(Process _ gs')) = hideB (gs `intersect` gs') b
+    f (Hide gs b) = descend (f . Hide gs) b
 
     f (Preempt Stop b) = b
 
@@ -187,12 +193,9 @@ gatesFreeIn gates b = gatesFreeIn' (gates, Set.empty) $ children b
 gatesFreeIn' :: (Set.Set Gate, Set.Set Gate) -> [Behavior] -> Set.Set Gate
 gatesFreeIn' start = snd . foldr (\ b (want, found) -> (Set.difference want &&& Set.union found) $ gatesFreeIn want b) start
 
-removeHiddenActions :: Behavior -> Behavior
-removeHiddenActions = removeAction []
-    where
-    removeAction gates (Action g _ b) | g `elem` gates = removeAction gates b
-    removeAction gates (Hide gates' b) = Hide gates' $ removeAction (gates `union` gates') b
-    removeAction gates b = descend (removeAction gates) b
+hideB :: [Gate] -> Behavior -> Behavior
+hideB [] b = b
+hideB gates b = Hide gates b
 
 parallelB :: [Gate] -> Behavior -> Behavior -> Behavior
 parallelB sync b1 b2 = maybe Stop flatten $ parallel' (Parallel sync) (`elem` sync) b1 b2
@@ -293,7 +296,7 @@ commonExit :: [[ExitExpression]] -> Maybe [ExitExpression]
 commonExit exprs = if all same $ transpose exprs then Just (head exprs) else Nothing
 
 sample :: Behavior
-sample = simplify $ removeHiddenActions $ uncontrolled ["os.req", "dev.irq"] $ Hide class_gates $ parallelB class_gates os_spec dev_spec
+sample = simplify $ uncontrolled ["os.req", "dev.irq"] $ Hide class_gates $ parallelB class_gates os_spec dev_spec
     where
     class_gates = ["class.send", "class.ok", "class.err"]
     os_spec = (Action "os.req" [VariableDeclaration "msg"] (Action "class.send" [ValueDeclaration $ Variable "msg"] (Choice (Action "class.ok" [] (Action "os.complete" [] $ Exit [])) (Action "class.err" [VariableDeclaration "err"] (Action "os.failed" [ValueDeclaration $ Variable "err"] $ Exit [])))))
