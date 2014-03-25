@@ -4,11 +4,12 @@ module LOTOS where
 import Control.Arrow
 import Control.Monad
 import Data.Data
+import Data.Function
+import Data.Generics.Str
+import Data.Generics.Uniplate.Data
 import Data.List
 import qualified Data.Map as Map
 import Data.Maybe
-import Data.Generics.Str
-import Data.Generics.Uniplate.Data
 import qualified Data.Set as Set
 import Data.Typeable
 
@@ -98,9 +99,31 @@ simplify = transform f
         replaceExit (Sequence a names b) = Sequence a names $ replaceExit b
         replaceExit b = descend replaceExit b
 
-    f (Parallel sync b1 b2) = case Set.toList $ gatesFreeIn' (Set.fromList sync, Set.empty) [b1, b2] of
-        [] -> f $ Interleaving b1 b2
-        sync' -> Parallel sync' b1 b2
+    -- Avoid infinite loop when simplifying the result of impossibleGates.
+    f p@(Parallel _ (Process{}) Stop) = p
+    f p@(Parallel _ Stop (Process{})) = p
+
+    -- Distribute Parallel across Interleaving when possible.
+    f (Parallel sync b1 b2) = emitInterleavings $ parallels ++ empty
+        where
+        hasSyncGates b = partition (Set.null . snd) [ (branch, Set.fromList sync `gatesFreeIn` branch) | branch <- interleavingBranches b ]
+        (lempty, l) = hasSyncGates b1
+        (rempty, r) = hasSyncGates b2
+        empty = map fst $ lempty ++ rempty
+        partitions = disjointPartitions $ nub $ map snd $ l ++ r
+        parallels = [ (emitParallel `on` filterInPartition p) l r | p <- partitions ]
+        emitInterleavings = foldr1 (\ b1' b2' -> f $ Interleaving b1' b2')
+        filterInPartition p = filter ((`elem` p) . snd)
+        emitParallel l r = case (l, r) of
+            ([], _) -> r'
+            (_, []) -> l'
+            _ -> Parallel (lsync `union` rsync) l' r'
+            where
+            simpleGates g b = if null g then b else simplify $ impossibleGates g b
+            lsync = Set.toList $ Set.unions $ map snd l
+            l' = simpleGates (lsync \\ rsync) $ emitInterleavings $ map fst l
+            rsync = Set.toList $ Set.unions $ map snd r
+            r' = simpleGates (rsync \\ lsync) $ emitInterleavings $ map fst r
 
     f (Synchronization (Exit v1) (Exit v2)) | Just merged <- unifyExits v1 v2 = Exit merged
 
@@ -113,6 +136,25 @@ simplify = transform f
         gs' -> Hide gs' b
 
     f b = b
+
+impossibleGates :: [Gate] -> Behavior -> Behavior
+impossibleGates [] b = b
+impossibleGates gates (Action g _ _) | g `elem` gates = Stop
+impossibleGates gates (Hide gates' b) = impossibleGates (gates \\ gates') b
+impossibleGates gates p@(Process name gates') | not (null (gates `intersect` gates')) = Parallel (gates `intersect` gates') p Stop
+impossibleGates gates b = descend (impossibleGates gates) b
+
+interleavingBranches :: Behavior -> [Behavior]
+interleavingBranches (Interleaving b1 b2) = interleavingBranches b1 ++ interleavingBranches b2
+interleavingBranches b = [b]
+
+disjointPartitions :: Ord a => [Set.Set a] -> [[Set.Set a]]
+disjointPartitions [] = []
+disjointPartitions (x : xs) = let (disj, conj) = go x xs in (x : conj) : disjointPartitions disj
+    where
+    go disjointWith xs = case partition (Set.null . Set.intersection disjointWith) xs of
+        (disj@(_:_), conj@(_:_)) -> second (conj ++) $ go (Set.unions conj) disj
+        ret -> ret
 
 unifyExits :: [ExitExpression] -> [ExitExpression] -> Maybe [ExitExpression]
 unifyExits v1 v2 = sequence $ zipWith exitMerge v1 v2
