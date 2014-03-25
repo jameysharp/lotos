@@ -85,6 +85,9 @@ simplify :: Behavior -> Behavior
 simplify = transform f
     where
     -- Note: If any rule introduces a constructor that appears in some rule's pattern, be sure to apply `f` recursively.
+    f (Choice Stop b) = b
+    f (Choice a Stop) = a
+
     f (Sequence (Action g vs b1) names b2) = Action g vs $ f $ Sequence b1 names b2
     f (Sequence Stop _ _) = Stop
     f (Sequence (Exit vs) names b) | not (any (ExitAny ==) vs) = rename [(old, new) | (ExitExpression new, old) <- zip vs names, Variable old /= new ] b
@@ -127,6 +130,9 @@ simplify = transform f
 
     f (Synchronization (Exit v1) (Exit v2)) | Just merged <- unifyExits v1 v2 = Exit merged
 
+    f (Interleaving Stop b) = alwaysStop b
+    f (Interleaving a Stop) = alwaysStop a
+
     f (Interleaving (Exit v1) (Exit v2)) | Just merged <- unifyExits v1 v2 = Exit merged
     f (Interleaving (Exit v) b) | all (ExitAny ==) v = b
     f (Interleaving a (Exit v)) | all (ExitAny ==) v = a
@@ -134,6 +140,8 @@ simplify = transform f
     f (Hide gs b) = case Set.toList $ Set.fromList gs `gatesFreeIn` b of
         [] -> b
         gs' -> Hide gs' b
+
+    f (Preempt Stop b) = b
 
     f b = b
 
@@ -155,6 +163,11 @@ disjointPartitions (x : xs) = let (disj, conj) = go x xs in (x : conj) : disjoin
     go disjointWith xs = case partition (Set.null . Set.intersection disjointWith) xs of
         (disj@(_:_), conj@(_:_)) -> second (conj ++) $ go (Set.unions conj) disj
         ret -> ret
+
+alwaysStop :: Behavior -> Behavior
+alwaysStop (Exit _) = Stop
+alwaysStop b@(Process{}) = Sequence b [] Stop
+alwaysStop b = descend alwaysStop b
 
 unifyExits :: [ExitExpression] -> [ExitExpression] -> Maybe [ExitExpression]
 unifyExits v1 v2 = sequence $ zipWith exitMerge v1 v2
