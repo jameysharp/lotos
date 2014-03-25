@@ -111,39 +111,38 @@ interleavingB a (Exit v) | all (== ExitAny) v = a
 interleavingB a b = Interleaving a b
 
 parallelB :: [Gate] -> Behavior -> Behavior -> Behavior
-parallelB sync b1 b2 = maybe Stop flatten $ parallel' (`elem` sync) b1 b2
+parallelB sync b1 b2 = maybe Stop flatten $ parallel' (Parallel sync) (`elem` sync) b1 b2
 
 synchronizationB :: Behavior -> Behavior -> Behavior
-synchronizationB b1 b2 = maybe Stop flatten $ parallel' (const True) b1 b2
+synchronizationB b1 b2 = maybe Stop flatten $ parallel' Synchronization (const True) b1 b2
 
-parallel' :: (Gate -> Bool) -> Behavior -> Behavior -> Maybe (Behavior, Behavior, [Name], Behavior)
-parallel' sync (Action g1 v1 b1) b2
+parallel' :: (Behavior -> Behavior -> Behavior) -> (Gate -> Bool) -> Behavior -> Behavior -> Maybe (Behavior, Behavior, [Name], Behavior)
+parallel' base sync (Action g1 v1 b1) b2
     | not (sync g1) = do
-        (l, r, names, b) <- parallel' sync b1 b2
+        (l, r, names, b) <- parallel' base sync b1 b2
         return (Action g1 v1 l, r, names, b)
     | isTerminalBehavior b2 = Nothing -- gate in sync can't match
-parallel' sync b1 (Action g2 v2 b2)
+parallel' base sync b1 (Action g2 v2 b2)
     | not (sync g2) = do
-        (l, r, names, b) <- parallel' sync b1 b2
+        (l, r, names, b) <- parallel' base sync b1 b2
         return (l, Action g2 v2 r, names, b)
     | isTerminalBehavior b1 = Nothing -- gate in sync can't match
-parallel' sync (Action g1 v1 b1) (Action g2 v2 b2)
+parallel' base sync (Action g1 v1 b1) (Action g2 v2 b2)
     | g1 == g2 = do
         guard $ length v1 == length v2 -- sync gates must have same attribute types
         let freshNames = getFreshNames v1 v2
         let push decls = rename [(old, Variable new) | (VariableDeclaration old, new) <- zip decls freshNames, old /= new ]
-        rest <- parallel' sync (push v1 b1) (push v2 b2)
+        rest <- parallel' base sync (push v1 b1) (push v2 b2)
         let l = Exit $ map exitExpression v1
         let r = Exit $ map exitExpression v2
         return (l, r, freshNames, Action g1 (map (ValueDeclaration . Variable) freshNames) $ flatten rest)
     | otherwise = Nothing
-parallel' sync (Choice b1 b2) pb =
-    case map flatten $ mapMaybe (parallel' sync pb) [b1, b2] of
+parallel' base sync (Choice b1 b2) pb =
+    case map flatten $ mapMaybe (parallel' base sync pb) [b1, b2] of
     [] -> Nothing
     (b:bs) -> Just (Exit [], Exit [], [], foldr Choice b bs)
-parallel' sync b1 b2@(Choice _ _) = parallel' sync b2 b1
-parallel' sync (Exit []) (Exit []) = Just (Exit [], Exit [], [], Exit [])
-parallel' _ a b = error $ "what to do with parallel' (" ++ show a ++ ") (" ++ show b ++ ")?"
+parallel' base sync b1 b2@(Choice _ _) = parallel' base sync b2 b1
+parallel' base _ a b = Just $ (Exit [], Exit [], [], base a b)
 
 exitExpression :: GateValue -> ExitExpression
 exitExpression (ValueDeclaration expr) = ExitExpression expr
