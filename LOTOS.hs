@@ -133,9 +133,9 @@ simplify = transform f
     f (Interleaving Stop b) = alwaysStop b
     f (Interleaving a Stop) = alwaysStop a
 
-    f (Interleaving (Exit v1) (Exit v2)) | Just merged <- unifyExits v1 v2 = Exit merged
-    f (Interleaving (Exit v) b) | all (ExitAny ==) v = b
-    f (Interleaving a (Exit v)) | all (ExitAny ==) v = a
+    -- XXX: Not clearly correct if subtree contains a Process or name shadowing.
+    f (Interleaving (Exit vs) b) | Just merged <- transformBiM (unifyExits vs) b = merged
+    f (Interleaving a (Exit vs)) | Just merged <- transformBiM (unifyExits vs) a = merged
 
     f (Hide gs b) = case Set.toList $ Set.fromList gs `gatesFreeIn` b of
         [] -> b
