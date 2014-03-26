@@ -1,3 +1,4 @@
+{-# LANGUAGE PatternGuards #-}
 module LOTOS.Simplify (simplify) where
 
 import LOTOS.AST

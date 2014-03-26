@@ -1,3 +1,4 @@
+{-# LANGUAGE PatternGuards #-}
 module LOTOS.Controllable (uncontrolled) where
 
 import LOTOS.AST
