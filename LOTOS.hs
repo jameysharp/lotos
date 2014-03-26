@@ -130,8 +130,8 @@ simplify = transform f
 
     f (Synchronization (Exit v1) (Exit v2)) | Just merged <- unifyExits v1 v2 = Exit merged
 
-    f (Interleaving Stop b) = alwaysStop b
-    f (Interleaving a Stop) = alwaysStop a
+    f (Interleaving Stop b) = insertBeforeExit (const Stop) [] b
+    f (Interleaving a Stop) = insertBeforeExit (const Stop) [] a
 
     -- XXX: Not clearly correct if subtree contains a Process or name shadowing.
     f (Interleaving (Exit vs) b) | Just merged <- transformBiM (unifyExits vs) b = merged
@@ -170,10 +170,11 @@ disjointPartitions (x : xs) = let (disj, conj) = go x xs in (x : conj) : disjoin
         (disj@(_:_), conj@(_:_)) -> second (conj ++) $ go (Set.unions conj) disj
         ret -> ret
 
-alwaysStop :: Behavior -> Behavior
-alwaysStop (Exit _) = Stop
-alwaysStop b@(Process{}) = Sequence b [] Stop
-alwaysStop b = descend alwaysStop b
+insertBeforeExit :: ([ExitExpression] -> Behavior) -> [Name] -> Behavior -> Behavior
+insertBeforeExit f _ (Exit vs) = f vs
+insertBeforeExit f results b@(Process{}) = Sequence b results $ f $ map (ExitExpression . Variable) results
+insertBeforeExit f results (Sequence lhs names rhs) = Sequence lhs names $ insertBeforeExit f results rhs
+insertBeforeExit f results b = descend (insertBeforeExit f results) b
 
 unifyExits :: [ExitExpression] -> [ExitExpression] -> Maybe [ExitExpression]
 unifyExits v1 v2 = sequence $ zipWith exitMerge v1 v2
