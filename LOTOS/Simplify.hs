@@ -17,10 +17,10 @@ simplify = transform f
     f (Choice Stop b) = b
     f (Choice a Stop) = a
 
-    f (Sequence (Action g vs b1) names b2) = Action g vs $ f $ Sequence b1 names b2
-    f (Sequence Stop _ _) = Stop
-    f (Sequence (Exit vs) names b) | not (any (ExitAny ==) vs) = rename [(old, new) | (ExitExpression new, old) <- zip vs names, Variable old /= new ] b
-    f (Sequence b names (Exit vs)) = replaceExit b
+    f (Sequence names (Action g vs b1) b2) = Action g vs $ f $ Sequence names b1 b2
+    f (Sequence _ Stop _) = Stop
+    f (Sequence names (Exit vs) b) | not (any (ExitAny ==) vs) = rename [(old, new) | (ExitExpression new, old) <- zip vs names, Variable old /= new ] b
+    f (Sequence names b (Exit vs)) = replaceExit b
         where
         replaceExit (Exit vs') =
             let rebind (ExitExpression (Variable var)) | Just expr <- lookup var (zip names vs') = expr
@@ -101,7 +101,7 @@ disjointPartitions (x : xs) = let (disj, conj) = go x xs in (x : conj) : disjoin
 
 insertBeforeExit :: ([ExitExpression] -> Behavior) -> [Variable] -> Behavior -> Behavior
 insertBeforeExit f _ (Exit vs) = f vs
-insertBeforeExit f results b@(Process{}) = Sequence b results $ f $ map (ExitExpression . Variable) results
+insertBeforeExit f results b@(Process{}) = Sequence results b $ f $ map (ExitExpression . Variable) results
 insertBeforeExit f results (Sequence lhs names rhs) = Sequence lhs names $ insertBeforeExit f results rhs
 insertBeforeExit f results b = descend (insertBeforeExit f results) b
 

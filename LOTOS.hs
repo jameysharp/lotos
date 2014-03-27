@@ -58,7 +58,7 @@ getFreshNames (ValueDeclaration (Variable name) : v1) (_ : v2) = name : getFresh
 getFreshNames v1 v2 = error $ "getFreshNames: " ++ show v1 ++ " " ++ show v2
 
 flatten :: (Behavior, Behavior, [Variable], Behavior) -> Behavior
-flatten (l, r, names, b) = Sequence (Interleaving l r) names b
+flatten (l, r, names, b) = Sequence names (Interleaving l r) b
 
 sample :: Behavior
 sample = simplify $ uncontrolled ["os.req", "dev.irq"] $ Hide class_gates $ parallelB class_gates os_spec dev_spec

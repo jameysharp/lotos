@@ -40,7 +40,7 @@ data Behavior
     | Hide [Gate] Behavior
     | Process String [Gate]
     | Exit [ExitExpression]
-    | Sequence Behavior [Variable] Behavior
+    | Sequence [Variable] Behavior Behavior
     | Preempt Behavior Behavior
     deriving (Data, Typeable)
 
@@ -56,7 +56,7 @@ instance Show Behavior where
     show (Process name gs) = name ++ " " ++ show gs
     show (Exit []) = "exit"
     show (Exit gs) = "exit(" ++ unwords (map show gs) ++ ")"
-    show (Sequence b1 accept b2) = "(" ++ show b1 ++ ") >> " ++
+    show (Sequence accept b1 b2) = "(" ++ show b1 ++ ") >> " ++
         case accept of
         [] -> "(" ++ show b2 ++ ")"
         _ -> unwords ("accept" : accept ++ ["in", "(" ++ show b2 ++ ")"])

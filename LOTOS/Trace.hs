@@ -18,7 +18,7 @@ traceBehavior (Synchronization b1 b2) = (synchronizeTrace (const True) `on` trac
 traceBehavior (Hide _ b) = traceBehavior b
 traceBehavior (Process{}) = Trace Map.empty -- FIXME: ought to recurse on the named Process
 traceBehavior (Exit _) = TraceExit
-traceBehavior (Sequence b1 _ b2) = replaceTraceExit (traceBehavior b2) $ traceBehavior b1
+traceBehavior (Sequence _ b1 b2) = replaceTraceExit (traceBehavior b2) $ traceBehavior b1
 traceBehavior (Preempt b1 b2) = preempt $ traceBehavior b1
     where
     preempt t = joinChoiceTrace (mapTrace preempt t) $ traceBehavior b2
