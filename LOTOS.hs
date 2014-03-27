@@ -2,6 +2,7 @@ module LOTOS where
 
 import LOTOS.AST
 import LOTOS.Controllable
+import LOTOS.Parser
 import LOTOS.Simplify
 
 import Control.Monad
@@ -64,5 +65,6 @@ sample :: Behavior
 sample = simplify $ uncontrolled ["os.req", "dev.irq"] $ Hide class_gates $ parallelB class_gates os_spec dev_spec
     where
     class_gates = ["class.send", "class.ok", "class.err"]
-    os_spec = (Action "os.req" [VariableDeclaration "msg"] (Action "class.send" [ValueDeclaration $ Variable "msg"] (Choice (Action "class.ok" [] (Action "os.complete" [] $ Exit [])) (Action "class.err" [VariableDeclaration "err"] (Action "os.failed" [ValueDeclaration $ Variable "err"] $ Exit [])))))
-    dev_spec = (Action "dev.enqueue" [VariableDeclaration "packet"] (Action "class.send" [ValueDeclaration $ Variable "packet"] (Action "dev.irq" [VariableDeclaration "status"] (Choice (Action "class.ok" [] $ Exit []) (Action "class.err" [ValueDeclaration $ Variable "status"] $ Exit [])))))
+
+Right os_spec = parseBehavior "" "os.req ?msg; class.send !msg; (class.ok; os.complete; exit [] class.err ?err; os.failed !err; exit)"
+Right dev_spec = parseBehavior "" "dev.enqueue ?packet; class.send !packet; dev.irq ?status; (class.ok; exit [] class.err !status; exit)"
