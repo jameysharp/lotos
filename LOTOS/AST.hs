@@ -3,6 +3,7 @@ module LOTOS.AST where
 
 import Data.Data
 import Data.Generics.Uniplate.Data
+import Data.List
 import Data.Maybe
 import Data.Typeable
 
@@ -48,19 +49,19 @@ instance Show Behavior where
     show Stop = "stop"
     show (Action g vs b) = unwords (g : map show vs) ++ "; " ++ show b
     show (Choice b1 b2) = "(" ++ show b1 ++ ") [] (" ++ show b2 ++ ")"
-    show (Parallel gs b1 b2) = "(" ++ show b1 ++ ") |" ++ show gs ++ "| (" ++ show b2 ++ ")"
+    show (Parallel gs b1 b2) = "(" ++ show b1 ++ ") |[" ++ intercalate ", " gs ++ "]| (" ++ show b2 ++ ")"
     show (Interleaving b1 b2) = "(" ++ show b1 ++ ") ||| (" ++ show b2 ++ ")"
     show (Synchronization b1 b2) = "(" ++ show b1 ++ ") || (" ++ show b2 ++ ")"
-    show (Hide gs b) = unwords ("hide" : gs ++ ["in", show b])
+    show (Hide gs b) = unwords ("hide" : [intercalate ", " gs, "in", "(" ++ show b ++ ")"])
     show (Process name []) = name
-    show (Process name gs) = name ++ " " ++ show gs
+    show (Process name gs) = name ++ " " ++ "[" ++ intercalate ", " gs ++ "]"
     show (Exit []) = "exit"
-    show (Exit gs) = "exit(" ++ unwords (map show gs) ++ ")"
+    show (Exit gs) = "exit(" ++ intercalate ", " (map show gs) ++ ")"
     show (Sequence accept b1 b2) = "(" ++ show b1 ++ ") >> " ++
         case accept of
         [] -> "(" ++ show b2 ++ ")"
-        _ -> unwords ("accept" : accept ++ ["in", "(" ++ show b2 ++ ")"])
-    show (Preempt b1 b2) = "(" ++ show b1 ++ ") |> (" ++ show b2 ++ ")"
+        _ -> unwords ("accept" : [intercalate ", " accept, "in", "(" ++ show b2 ++ ")"])
+    show (Preempt b1 b2) = "(" ++ show b1 ++ ") [> (" ++ show b2 ++ ")"
 
 rename :: [(Variable, Expression)] -> Behavior -> Behavior
 rename [] b = b
