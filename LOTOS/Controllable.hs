@@ -47,7 +47,7 @@ extractInterleavedAction b1 b2 = do
 exits :: Behavior -> [[ExitExpression]]
 exits b = [exprs | Exit exprs <- universe b] -- FIXME: exclude Exits from Sequence LHS
 
-exitOf :: [Name] -> [ExitExpression] -> [ExitExpression]
+exitOf :: [Variable] -> [ExitExpression] -> [ExitExpression]
 exitOf names = map restrict
     where
     restrict exit@(ExitExpression expr) | any (`elem` names) [var | Variable var <- universe expr] = exit

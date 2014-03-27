@@ -99,7 +99,7 @@ disjointPartitions (x : xs) = let (disj, conj) = go x xs in (x : conj) : disjoin
         (disj@(_:_), conj@(_:_)) -> second (conj ++) $ go (Set.unions conj) disj
         ret -> ret
 
-insertBeforeExit :: ([ExitExpression] -> Behavior) -> [Name] -> Behavior -> Behavior
+insertBeforeExit :: ([ExitExpression] -> Behavior) -> [Variable] -> Behavior -> Behavior
 insertBeforeExit f _ (Exit vs) = f vs
 insertBeforeExit f results b@(Process{}) = Sequence b results $ f $ map (ExitExpression . Variable) results
 insertBeforeExit f results (Sequence lhs names rhs) = Sequence lhs names $ insertBeforeExit f results rhs

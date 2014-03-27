@@ -18,7 +18,7 @@ parallelB sync b1 b2 = maybe Stop flatten $ parallel' (Parallel sync) (`elem` sy
 synchronizationB :: Behavior -> Behavior -> Behavior
 synchronizationB b1 b2 = maybe Stop flatten $ parallel' Synchronization (const True) b1 b2
 
-parallel' :: (Behavior -> Behavior -> Behavior) -> (Gate -> Bool) -> Behavior -> Behavior -> Maybe (Behavior, Behavior, [Name], Behavior)
+parallel' :: (Behavior -> Behavior -> Behavior) -> (Gate -> Bool) -> Behavior -> Behavior -> Maybe (Behavior, Behavior, [Variable], Behavior)
 parallel' base sync (Action g1 v1 b1) b2
     | not (sync g1) = do
         (l, r, names, b) <- parallel' base sync b1 b2
@@ -50,14 +50,14 @@ exitExpression :: GateValue -> ExitExpression
 exitExpression (ValueDeclaration expr) = ExitExpression expr
 exitExpression (VariableDeclaration _) = ExitAny
 
-getFreshNames :: [GateValue] -> [GateValue] -> [Name]
+getFreshNames :: [GateValue] -> [GateValue] -> [Variable]
 getFreshNames [] [] = []
 getFreshNames (VariableDeclaration name : v1) (_ : v2) = name : getFreshNames v1 v2
 getFreshNames (_ : v1) (VariableDeclaration name : v2) = name : getFreshNames v1 v2
 getFreshNames (ValueDeclaration (Variable name) : v1) (_ : v2) = name : getFreshNames v1 v2
 getFreshNames v1 v2 = error $ "getFreshNames: " ++ show v1 ++ " " ++ show v2
 
-flatten :: (Behavior, Behavior, [Name], Behavior) -> Behavior
+flatten :: (Behavior, Behavior, [Variable], Behavior) -> Behavior
 flatten (l, r, names, b) = Sequence (Interleaving l r) names b
 
 sample :: Behavior

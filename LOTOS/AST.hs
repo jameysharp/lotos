@@ -8,9 +8,9 @@ import Data.Typeable
 
 type Gate = String
 
-type Name = String
+type Variable = String
 
-newtype Expression = Variable Name
+newtype Expression = Variable Variable
     deriving (Eq, Data, Typeable)
 
 instance Show Expression where
@@ -23,7 +23,7 @@ instance Show ExitExpression where
     show ExitAny = "any"
     show (ExitExpression expr) = show expr
 
-data GateValue = ValueDeclaration Expression | VariableDeclaration Name
+data GateValue = ValueDeclaration Expression | VariableDeclaration Variable
     deriving (Data, Typeable)
 
 instance Show GateValue where
@@ -38,9 +38,9 @@ data Behavior
     | Interleaving Behavior Behavior
     | Synchronization Behavior Behavior
     | Hide [Gate] Behavior
-    | Process Name [Gate]
+    | Process String [Gate]
     | Exit [ExitExpression]
-    | Sequence Behavior [Name] Behavior
+    | Sequence Behavior [Variable] Behavior
     | Preempt Behavior Behavior
     deriving (Data, Typeable)
 
@@ -62,7 +62,7 @@ instance Show Behavior where
         _ -> unwords ("accept" : accept ++ ["in", "(" ++ show b2 ++ ")"])
     show (Preempt b1 b2) = "(" ++ show b1 ++ ") |> (" ++ show b2 ++ ")"
 
-rename :: [(Name, Expression)] -> Behavior -> Behavior
+rename :: [(Variable, Expression)] -> Behavior -> Behavior
 rename [] b = b
 -- FIXME: handle name shadowing
 rename binding b = transformBi replace b
