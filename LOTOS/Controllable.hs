@@ -6,7 +6,7 @@ import LOTOS.AST
 import Control.Monad
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.Writer
-import Data.Generics.Uniplate.Data
+import Data.Generics
 import Data.List
 import qualified Data.Map as Map
 import Data.Monoid
@@ -15,7 +15,7 @@ uncontrolled :: [Gate] -> Behavior -> Behavior
 uncontrolled gates (Interleaving b1 b2)
     | b1 `isActionOn` gates || not (b2 `isActionOn` gates), Just b <- extractInterleavedAction b1 b2 = uncontrolled gates b
     | Just b <- extractInterleavedAction b2 b1 = uncontrolled gates b
-uncontrolled gates b = descend (uncontrolled gates) b
+uncontrolled gates b = gmapT (mkT $ uncontrolled gates) b
 
 isActionOn :: Behavior -> [Gate] -> Bool
 isActionOn (Action g _ _) gates | g `elem` gates = True
@@ -47,17 +47,17 @@ extractInterleavedAction b1 b2 = do
                 writer (vs', [foldr Map.delete binding shadowed])
         return $ Action g vs' b'
     unify common b = do
-        (b', bindings) <- lift $ runWriterT $ descendM (unify common) b
+        (b', bindings) <- lift $ runWriterT $ gmapM (mkM $ unify common) b
         guard $ null bindings || same bindings
         writer (b', take 1 bindings)
 
 exits :: Behavior -> [[ExitExpression]]
-exits b = [exprs | Exit exprs <- universe b] -- FIXME: exclude Exits from Sequence LHS
+exits b = [exprs | Exit exprs <- listify (const True) b] -- FIXME: exclude Exits from Sequence LHS
 
 exitOf :: [Variable] -> [ExitExpression] -> [ExitExpression]
 exitOf names = map restrict
     where
-    restrict exit@(ExitExpression expr) | any (`elem` names) [var | Variable var <- universe expr] = exit
+    restrict exit@(ExitExpression expr) | any (`elem` names) [var | Variable var <- listify (const True) expr] = exit
     restrict _ = ExitAny
 
 same :: Eq a => [a] -> Bool

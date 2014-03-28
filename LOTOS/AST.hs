@@ -2,7 +2,7 @@
 module LOTOS.AST where
 
 import Data.Data
-import Data.Generics.Uniplate.Data
+import Data.Generics
 import Data.List
 import Data.Maybe
 import Data.Typeable
@@ -66,6 +66,6 @@ instance Show Behavior where
 rename :: [(Variable, Expression)] -> Behavior -> Behavior
 rename [] b = b
 -- FIXME: handle name shadowing
-rename binding b = transformBi replace b
+rename binding b = everywhere (mkT replace) b
     where
     replace old@(Variable name) = fromMaybe old $ lookup name binding
