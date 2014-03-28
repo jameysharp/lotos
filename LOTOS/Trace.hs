@@ -6,7 +6,17 @@ import Data.Function
 import qualified Data.Map as Map
 
 data Trace = TraceExit | Trace (Map.Map Gate Trace)
-    deriving Show
+
+instance Show Trace where
+    show = show . untraceBehavior
+
+untraceBehavior :: Trace -> Behavior
+untraceBehavior TraceExit = Exit []
+untraceBehavior (Trace t) = case map extract $ Map.toList t of
+    [] -> Stop
+    x:xs -> foldl Choice x xs
+    where
+    extract (g, t') = Action g [] $ untraceBehavior t'
 
 traceBehavior :: Behavior -> Trace
 traceBehavior Stop = Trace Map.empty
