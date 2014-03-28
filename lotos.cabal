@@ -23,4 +23,5 @@ library
   build-depends:       base ==4.6.*,
                        containers ==0.5.*,
                        parsec ==3.1.*,
+                       transformers ==0.3.*,
                        uniplate ==1.6.*
