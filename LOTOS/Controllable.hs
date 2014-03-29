@@ -63,5 +63,7 @@ exitOf names = map restrict
 same :: Eq a => [a] -> Bool
 same (x:xs) = all (x ==) xs
 
-commonExit :: [[ExitExpression]] -> Maybe [ExitExpression]
-commonExit exprs = if all same $ transpose exprs then Just (head exprs) else Nothing
+commonExit :: (Monad m, MonadPlus m) => [[ExitExpression]] -> m [ExitExpression]
+commonExit exprs = do
+    guard $ all same $ transpose exprs
+    return $ head exprs

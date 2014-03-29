@@ -24,12 +24,12 @@ parallel' base sync (Action g1 v1 b1) b2
     | not (sync g1) = do
         (l, r, names, b) <- parallel' base sync b1 b2
         return (Action g1 v1 l, r, names, b)
-    | isTerminalBehavior b2 = Nothing -- gate in sync can't match
+    | isTerminalBehavior b2 = mzero -- gate in sync can't match
 parallel' base sync b1 (Action g2 v2 b2)
     | not (sync g2) = do
         (l, r, names, b) <- parallel' base sync b1 b2
         return (l, Action g2 v2 r, names, b)
-    | isTerminalBehavior b1 = Nothing -- gate in sync can't match
+    | isTerminalBehavior b1 = mzero -- gate in sync can't match
 parallel' base sync (Action g1 v1 b1) (Action g2 v2 b2)
     | g1 == g2 = do
         guard $ length v1 == length v2 -- sync gates must have same attribute types
@@ -39,13 +39,13 @@ parallel' base sync (Action g1 v1 b1) (Action g2 v2 b2)
         let l = Exit $ map exitExpression v1
         let r = Exit $ map exitExpression v2
         return (l, r, freshNames, Action g1 (map (ValueDeclaration . Variable) freshNames) $ flatten rest)
-    | otherwise = Nothing
+    | otherwise = mzero
 parallel' base sync (Choice b1 b2) pb =
     case map flatten $ mapMaybe (parallel' base sync pb) [b1, b2] of
     [] -> Nothing
     (b:bs) -> Just (Exit [], Exit [], [], foldr Choice b bs)
 parallel' base sync b1 b2@(Choice _ _) = parallel' base sync b2 b1
-parallel' base _ a b = Just $ (Exit [], Exit [], [], base a b)
+parallel' base _ a b = return (Exit [], Exit [], [], base a b)
 
 exitExpression :: GateValue -> ExitExpression
 exitExpression (ValueDeclaration expr) = ExitExpression expr
