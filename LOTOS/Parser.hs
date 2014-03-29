@@ -9,6 +9,7 @@ import Control.Monad
 import Text.Parsec hiding ((<|>), many)
 import Text.Parsec.Expr
 import qualified Text.Parsec.Token as T
+import Unbound.LocallyNameless (s2n)
 
 lexer :: Stream s m Char => T.GenTokenParser s u m
 lexer = T.makeTokenParser $ T.LanguageDef {
@@ -26,7 +27,7 @@ lexer = T.makeTokenParser $ T.LanguageDef {
 }
 
 variableName :: Stream s m Char => ParsecT s u m Variable
-variableName = T.identifier lexer <?> "variable name"
+variableName = s2n <$> T.identifier lexer <?> "variable name"
 
 gateName :: Stream s m Char => ParsecT s u m Gate
 gateName = T.identifier lexer <?> "gate name"

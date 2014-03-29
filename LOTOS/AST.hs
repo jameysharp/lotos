@@ -8,10 +8,11 @@ module LOTOS.AST where
 import Data.List
 import Data.Maybe
 import Generics.RepLib
+import Unbound.LocallyNameless
 
 type Gate = String
 
-type Variable = String
+type Variable = Name Expression
 
 newtype Expression = Variable Variable
     deriving Eq
@@ -19,7 +20,7 @@ newtype Expression = Variable Variable
 $(derive [''Expression])
 
 instance Show Expression where
-    show (Variable name) = name
+    show (Variable name) = name2String name
 
 data ExitExpression = ExitExpression Expression | ExitAny
     deriving Eq
@@ -36,7 +37,7 @@ $(derive [''GateValue])
 
 instance Show GateValue where
     show (ValueDeclaration expr) = '!' : show expr
-    show (VariableDeclaration name) = '?' : name
+    show (VariableDeclaration name) = '?' : name2String name
 
 data Behavior
     = Stop
@@ -68,7 +69,7 @@ instance Show Behavior where
     show (Sequence accept b1 b2) = "(" ++ show b1 ++ ") >> " ++
         case accept of
         [] -> "(" ++ show b2 ++ ")"
-        _ -> unwords ("accept" : [intercalate ", " accept, "in", "(" ++ show b2 ++ ")"])
+        _ -> unwords ("accept" : [intercalate ", " $ map name2String accept, "in", "(" ++ show b2 ++ ")"])
     show (Preempt b1 b2) = "(" ++ show b1 ++ ") [> (" ++ show b2 ++ ")"
 
 rename :: [(Variable, Expression)] -> Behavior -> Behavior
