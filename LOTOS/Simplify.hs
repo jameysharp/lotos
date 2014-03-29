@@ -14,98 +14,116 @@ import Unbound.LocallyNameless hiding (union)
 import Unbound.LocallyNameless.Ops
 
 simplify :: Behavior -> Behavior
-simplify = runFreshM . (everywhereM $ mkM f)
+simplify = runFreshM . (everywhereM $ mkM simplifyOnce)
+
+-- Note: If any rule introduces a constructor that appears in some rule's pattern, be sure to apply `simplifyOnce` recursively.
+simplifyOnce :: Behavior -> FreshM Behavior
+simplifyOnce (Choice b1 b2) = choiceB b1 b2
+simplifyOnce (Sequence b1 binding) = uncurry (sequenceB b1) =<< unbind binding
+simplifyOnce (Parallel sync b1 b2) = parallelB sync b1 b2
+simplifyOnce (Synchronization b1 b2) = synchronizationB b1 b2
+simplifyOnce (Interleaving b1 b2) = interleavingB b1 b2
+simplifyOnce (Hide gs b) = hideB gs b
+simplifyOnce (Preempt b1 b2) = preemptB b1 b2
+simplifyOnce b = return b
+
+choiceB :: Behavior -> Behavior -> FreshM Behavior
+choiceB Stop b = return b
+choiceB a Stop = return a
+choiceB a b = return $ Choice a b
+
+sequenceB :: Behavior -> [Variable] -> Behavior -> FreshM Behavior
+sequenceB (Action g binding) names b2 = do
+    (vs, b1) <- unbind binding
+    Action g <$> (bind vs <$> sequenceB b1 names b2)
+sequenceB Stop _ _ = return Stop
+sequenceB (Exit vs) names b | not (any (ExitAny ==) vs) = return $ substs [(old, new) | (ExitExpression new, old) <- zip vs names ] b
+sequenceB b1 names (Exit vs) = replaceExit b1
     where
-    -- Note: If any rule introduces a constructor that appears in some rule's pattern, be sure to apply `f` recursively.
-    f (Choice Stop b) = return b
-    f (Choice a Stop) = return a
+    replaceExit (Exit vs') =
+        let rebind (ExitExpression (Variable var)) | Just expr <- lookup var (zip names vs') = expr
+            -- XXX: Once Expression adds operators, check that we aren't using ExitAny as an operand
+            rebind e = e
+        in return $ Exit $ map rebind vs
+    -- Don't replace Exits on the LHS of a nested Sequence.
+    replaceExit (Sequence a binding) = do
+        (names', b) <- unbind binding
+        Sequence a <$> (bind names' <$> replaceExit b)
+    -- FIXME: handle Process
+    replaceExit b = descendBehavior replaceExit b
+sequenceB b1 names b2 = return $ Sequence b1 $ bind names b2
 
-    f (Sequence (Action g binding1) binding2) = do
-        (vs, b1) <- unbind binding1
-        Action g <$> (bind vs <$> f (Sequence b1 binding2))
-    f (Sequence Stop _) = return Stop
-    f (Sequence (Exit vs) binding) | not (any (ExitAny ==) vs) = do
-        (names, b) <- unbind binding
-        return $ substs [(old, new) | (ExitExpression new, old) <- zip vs names ] b
-    -- this must be the last Sequence rule as we can't pattern-match through bindings
-    f b@(Sequence b1 binding) = do
-        (names, b2) <- unbind binding
-        case b2 of
-            Exit vs -> replaceExit names vs b1
-            _ -> return b
+parallelB :: [Gate] -> Behavior -> Behavior -> FreshM Behavior
+-- Avoid infinite loop when simplifying the result of impossibleGates.
+parallelB sync p@(Process{}) Stop = return $ Parallel sync p Stop
+parallelB sync Stop p@(Process{}) = return $ Parallel sync Stop p
+-- Distribute Parallel across Interleaving when possible.
+parallelB sync b1 b2 = do
+    parallels <- sequence [ (emitParallel `on` filterInPartition p) l r | p <- partitions ]
+    emitInterleavings $ parallels ++ empty
+    where
+    hasSyncGates b = partition (Set.null . snd) [ (branch, Set.fromList sync `gatesFreeIn` branch) | branch <- interleavingBranches b ]
+    (lempty, l) = hasSyncGates b1
+    (rempty, r) = hasSyncGates b2
+    empty = map fst $ lempty ++ rempty
+    partitions = disjointPartitions $ nub $ map snd $ l ++ r
+    emitInterleavings (x:xs) = foldM (\ b1' b2' -> interleavingB b1' b2') x xs
+    filterInPartition p = filter ((`elem` p) . snd)
+    emitParallel l r = case (l, r) of
+        ([], _) -> r'
+        (_, []) -> l'
+        _ -> Parallel (lsync `union` rsync) <$> l' <*> r'
         where
-        replaceExit names vs (Exit vs') =
-            let rebind (ExitExpression (Variable var)) | Just expr <- lookup var (zip names vs') = expr
-                -- XXX: Once Expression adds operators, check that we aren't using ExitAny as an operand
-                rebind e = e
-            in return $ Exit $ map rebind vs
-        -- Don't replace Exits on the LHS of a nested Sequence.
-        replaceExit names vs (Sequence a binding) = do
-            (names', b) <- unbind binding
-            Sequence a <$> (bind names' <$> replaceExit names vs b)
-        -- FIXME: handle Process
-        replaceExit names vs b = descendBehavior (replaceExit names vs) b
+        simpleGates g branches = do
+            b <- emitInterleavings branches
+            if null g then return b else do
+            b' <- impossibleGates g b
+            everywhereM (mkM simplifyOnce) b'
+        lsync = Set.toList $ Set.unions $ map snd l
+        l' = simpleGates (lsync \\ rsync) $ map fst l
+        rsync = Set.toList $ Set.unions $ map snd r
+        r' = simpleGates (rsync \\ lsync) $ map fst r
 
-    -- Avoid infinite loop when simplifying the result of impossibleGates.
-    f p@(Parallel _ (Process{}) Stop) = return p
-    f p@(Parallel _ Stop (Process{})) = return p
+synchronizationB :: Behavior -> Behavior -> FreshM Behavior
+synchronizationB (Exit v1) (Exit v2) | Just merged <- unifyExits v1 v2 = return $ Exit merged
+synchronizationB b1 b2 = return $ Synchronization b1 b2
 
-    -- Distribute Parallel across Interleaving when possible.
-    f (Parallel sync b1 b2) = do
-        parallels <- sequence [ (emitParallel `on` filterInPartition p) l r | p <- partitions ]
-        emitInterleavings $ parallels ++ empty
-        where
-        hasSyncGates b = partition (Set.null . snd) [ (branch, Set.fromList sync `gatesFreeIn` branch) | branch <- interleavingBranches b ]
-        (lempty, l) = hasSyncGates b1
-        (rempty, r) = hasSyncGates b2
-        empty = map fst $ lempty ++ rempty
-        partitions = disjointPartitions $ nub $ map snd $ l ++ r
-        emitInterleavings (x:xs) = foldM (\ b1' b2' -> f $ Interleaving b1' b2') x xs
-        filterInPartition p = filter ((`elem` p) . snd)
-        emitParallel l r = case (l, r) of
-            ([], _) -> r'
-            (_, []) -> l'
-            _ -> Parallel (lsync `union` rsync) <$> l' <*> r'
-            where
-            simpleGates g branches = do
-                b <- emitInterleavings branches
-                if null g then return b else do
-                b' <- impossibleGates g b
-                everywhereM (mkM f) b'
-            lsync = Set.toList $ Set.unions $ map snd l
-            l' = simpleGates (lsync \\ rsync) $ map fst l
-            rsync = Set.toList $ Set.unions $ map snd r
-            r' = simpleGates (rsync \\ lsync) $ map fst r
+interleavingB :: Behavior -> Behavior -> FreshM Behavior
+interleavingB Stop b = insertBeforeExit (const Stop) [] b
+interleavingB a Stop = insertBeforeExit (const Stop) [] a
+-- XXX: Not clearly correct if subtree contains a Process or name shadowing.
+interleavingB (Exit vs) b | Just merged <- everywhereM (mkM $ unifyExits vs) b = return merged
+interleavingB a (Exit vs) | Just merged <- everywhereM (mkM $ unifyExits vs) a = return merged
+interleavingB b1 b2 = return $ Interleaving b1 b2
 
-    f (Synchronization (Exit v1) (Exit v2)) | Just merged <- unifyExits v1 v2 = return $ Exit merged
+hideB :: [Gate] -> Behavior -> FreshM Behavior
+hideB [] b = return b
+hideB gs b@(Action g binding) | g `elem` gs = do
+    (vs, b') <- unbind binding
+    if Set.null (bindersAny vs `Set.intersection` fvAny b')
+        then hideB gs b'
+        else hideB' gs b
+-- Don't hide any gate we're still trying to synchronize on.
+hideB gs b@(Synchronization{}) = hideB' gs b
+hideB gs b@(Parallel sync b1 b2) = case partition (`elem` sync) gs of
+    (inSync, []) -> hideB' inSync b
+    (inSync, notInSync) -> do
+        b1' <- hideB notInSync b1
+        b2' <- hideB notInSync b2
+        b' <- parallelB sync b1' b2'
+        hideB inSync b'
+hideB gs (Hide gs' b) = hideB (gs `union` gs') b
+hideB gs b@(Process{}) = hideB' gs b
+hideB gs b = simplifyOnce =<< descendBehavior (hideB gs) b
 
-    f (Interleaving Stop b) = insertBeforeExit (const Stop) [] b
-    f (Interleaving a Stop) = insertBeforeExit (const Stop) [] a
+hideB' :: [Gate] -> Behavior -> FreshM Behavior
+hideB' gs b = return $ case Set.toList $ Set.fromList gs `gatesFreeIn` b of
+    [] -> b
+    gs' -> Hide gs' b
 
-    -- XXX: Not clearly correct if subtree contains a Process or name shadowing.
-    f (Interleaving (Exit vs) b) | Just merged <- everywhereM (mkM $ unifyExits vs) b = return merged
-    f (Interleaving a (Exit vs)) | Just merged <- everywhereM (mkM $ unifyExits vs) a = return merged
-
-    f (Hide [] b) = return b
-    f b@(Hide gs (Action g binding)) | g `elem` gs = do
-        (vs, b') <- unbind binding
-        if Set.null (bindersAny vs `Set.intersection` fvAny b')
-            then f $ Hide gs b'
-            else return b
-    f (Hide gs b@(Synchronization{})) = return $ hideB (Set.toList $ Set.fromList gs `gatesFreeIn` b) b
-    f (Hide gs b@(Parallel sync _ _)) = do
-        -- Don't hide any gate we're still trying to synchronize on.
-        b' <- case gs \\ sync of
-            [] -> return b
-            gs' -> descendBehavior (f . Hide gs') b >>= f
-        return $ hideB (sync `intersect` gs) b'
-    f (Hide gs (Hide gs' b)) = f $ Hide (gs `union` gs') b
-    f (Hide gs b@(Process _ gs')) = return $ hideB (gs `intersect` gs') b
-    f (Hide gs b) = descendBehavior (f . Hide gs) b >>= f
-
-    f (Preempt Stop b) = return b
-
-    f b = return b
+preemptB :: Behavior -> Behavior -> FreshM Behavior
+preemptB Stop b = return b
+preemptB b1 b2 = return $ Preempt b1 b2
 
 impossibleGates :: (Fresh m, Applicative m) => [Gate] -> Behavior -> m Behavior
 impossibleGates [] b = return b
@@ -151,7 +169,3 @@ gatesFreeIn gates b = gatesFreeIn' (gates, Set.empty) $ subtreesBehavior b
 
 gatesFreeIn' :: (Set.Set Gate, Set.Set Gate) -> [Behavior] -> Set.Set Gate
 gatesFreeIn' start = snd . foldr (\ b (want, found) -> (Set.difference want &&& Set.union found) $ gatesFreeIn want b) start
-
-hideB :: [Gate] -> Behavior -> Behavior
-hideB [] b = b
-hideB gates b = Hide gates b
