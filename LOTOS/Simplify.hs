@@ -110,7 +110,7 @@ simplify = runFreshM . (everywhereM $ mkM f)
 impossibleGates :: (Fresh m, Applicative m) => [Gate] -> Behavior -> m Behavior
 impossibleGates [] b = return b
 impossibleGates gates (Action g _) | g `elem` gates = return Stop
-impossibleGates gates (Hide gates' b) = impossibleGates (gates \\ gates') b
+impossibleGates gates (Hide gates' b) = Hide gates' <$> impossibleGates (gates \\ gates') b
 impossibleGates gates p@(Process _ gates') | not (null (gates `intersect` gates')) = return $ Parallel (gates `intersect` gates') p Stop
 impossibleGates gates b = descendBehavior (impossibleGates gates) b
 
