@@ -6,10 +6,10 @@ import LOTOS.AST
 import Control.Monad
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.Writer
-import Data.Generics
 import Data.List
 import qualified Data.Map as Map
 import Data.Monoid
+import Generics.RepLib
 
 uncontrolled :: [Gate] -> Behavior -> Behavior
 uncontrolled gates (Interleaving b1 b2)

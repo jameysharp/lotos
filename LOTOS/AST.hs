@@ -1,31 +1,38 @@
-{-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE UndecidableInstances #-}
 module LOTOS.AST where
 
-import Data.Data
-import Data.Generics
 import Data.List
 import Data.Maybe
-import Data.Typeable
+import Generics.RepLib
 
 type Gate = String
 
 type Variable = String
 
 newtype Expression = Variable Variable
-    deriving (Eq, Data, Typeable)
+    deriving Eq
+
+$(derive [''Expression])
 
 instance Show Expression where
     show (Variable name) = name
 
 data ExitExpression = ExitExpression Expression | ExitAny
-    deriving (Eq, Data, Typeable)
+    deriving Eq
+
+$(derive [''ExitExpression])
 
 instance Show ExitExpression where
     show ExitAny = "any"
     show (ExitExpression expr) = show expr
 
 data GateValue = ValueDeclaration Expression | VariableDeclaration Variable
-    deriving (Data, Typeable)
+
+$(derive [''GateValue])
 
 instance Show GateValue where
     show (ValueDeclaration expr) = '!' : show expr
@@ -43,7 +50,8 @@ data Behavior
     | Exit [ExitExpression]
     | Sequence [Variable] Behavior Behavior
     | Preempt Behavior Behavior
-    deriving (Data, Typeable)
+
+$(derive [''Behavior])
 
 instance Show Behavior where
     show Stop = "stop"

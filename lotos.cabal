@@ -23,5 +23,5 @@ library
   build-depends:       base ==4.6.*,
                        containers ==0.5.*,
                        parsec ==3.1.*,
-                       syb ==0.4.*,
+                       RepLib ==0.5.*,
                        transformers ==0.3.*

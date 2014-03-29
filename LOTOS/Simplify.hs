@@ -5,10 +5,10 @@ import LOTOS.AST
 
 import Control.Arrow
 import Data.Function
-import Data.Generics
 import Data.List
 import Data.Maybe
 import qualified Data.Set as Set
+import Generics.RepLib
 
 simplify :: Behavior -> Behavior
 simplify = everywhere $ mkT f
@@ -118,7 +118,7 @@ gatesFreeIn gates (Action g _ b) = (if g `Set.member` gates then Set.insert g el
 gatesFreeIn gates (Parallel gs b1 b2) = gatesFreeIn' ((uncurry Set.difference &&& uncurry Set.intersection) (gates, Set.fromList gs)) [b1, b2]
 gatesFreeIn gates (Hide gs b) = gatesFreeIn (gates `Set.difference` Set.fromList gs) b
 gatesFreeIn gates (Process _ gs) = Set.fromList gs `Set.intersection` gates
-gatesFreeIn gates b = gatesFreeIn' (gates, Set.empty) $ gmapMp (mkMp (return :: Behavior -> [Behavior])) b
+gatesFreeIn gates b = gatesFreeIn' (gates, Set.empty) $ subtrees b
 
 gatesFreeIn' :: (Set.Set Gate, Set.Set Gate) -> [Behavior] -> Set.Set Gate
 gatesFreeIn' start = snd . foldr (\ b (want, found) -> (Set.difference want &&& Set.union found) $ gatesFreeIn want b) start
