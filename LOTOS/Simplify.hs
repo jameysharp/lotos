@@ -54,9 +54,6 @@ sequenceB b1 names (Exit vs) = replaceExit b1
 sequenceB b1 names b2 = return $ Sequence b1 $ bind names b2
 
 parallelB :: [Gate] -> Behavior -> Behavior -> FreshM Behavior
--- Avoid infinite loop when simplifying the result of impossibleGates.
-parallelB sync p@(Process{}) Stop = return $ Parallel sync p Stop
-parallelB sync Stop p@(Process{}) = return $ Parallel sync Stop p
 -- Distribute Parallel across Interleaving when possible.
 parallelB sync b1 b2 = do
     parallels <- sequence [ (emitParallel `on` filterInPartition p) l r | p <- partitions ]
@@ -74,11 +71,7 @@ parallelB sync b1 b2 = do
         (_, []) -> l'
         _ -> Parallel (lsync `union` rsync) <$> l' <*> r'
         where
-        simpleGates g branches = do
-            b <- emitInterleavings branches
-            if null g then return b else do
-            b' <- impossibleGates g b
-            everywhereM (mkM simplifyOnce) b'
+        simpleGates g branches = emitInterleavings branches >>= impossibleGates g
         lsync = Set.toList $ Set.unions $ map snd l
         l' = simpleGates (lsync \\ rsync) $ map fst l
         rsync = Set.toList $ Set.unions $ map snd r
@@ -125,12 +118,12 @@ preemptB :: Behavior -> Behavior -> FreshM Behavior
 preemptB Stop b = return b
 preemptB b1 b2 = return $ Preempt b1 b2
 
-impossibleGates :: (Fresh m, Applicative m) => [Gate] -> Behavior -> m Behavior
+impossibleGates :: [Gate] -> Behavior -> FreshM Behavior
 impossibleGates [] b = return b
 impossibleGates gates (Action g _) | g `elem` gates = return Stop
-impossibleGates gates (Hide gates' b) = Hide gates' <$> impossibleGates (gates \\ gates') b
+impossibleGates gates (Hide gates' b) = hideB gates' =<< impossibleGates (gates \\ gates') b
 impossibleGates gates p@(Process _ gates') | not (null (gates `intersect` gates')) = return $ Parallel (gates `intersect` gates') p Stop
-impossibleGates gates b = descendBehavior (impossibleGates gates) b
+impossibleGates gates b = simplifyOnce =<< descendBehavior (impossibleGates gates) b
 
 interleavingBranches :: Behavior -> [Behavior]
 interleavingBranches (Interleaving b1 b2) = interleavingBranches b1 ++ interleavingBranches b2
