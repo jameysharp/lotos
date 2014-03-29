@@ -1,3 +1,4 @@
+{-# LANGUAGE EmptyDataDecls #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
@@ -11,8 +12,6 @@ import Data.Maybe
 import Generics.RepLib
 import Unbound.LocallyNameless
 import Unbound.LocallyNameless.Ops
-
-type Gate = String
 
 type Variable = Name Expression
 
@@ -47,6 +46,11 @@ instance Show GateValue where
     show (ValueDeclaration (Embed expr)) = '!' : show expr
     show (VariableDeclaration name) = '?' : name2String name
 
+type Gate = Name GateInstance
+
+data GateInstance -- gates have no real representation
+$(derive [''GateInstance])
+
 data Behavior
     = Stop
     | Action Gate (Bind [GateValue] Behavior)
@@ -66,14 +70,14 @@ instance Subst Expression Behavior
 
 instance Show Behavior where
     show Stop = "stop"
-    show (Action g binding) = let (vs, b) = unsafeUnbind binding in unwords (g : map show vs) ++ "; " ++ show b
+    show (Action g binding) = let (vs, b) = unsafeUnbind binding in unwords (name2String g : map show vs) ++ "; " ++ show b
     show (Choice b1 b2) = "(" ++ show b1 ++ ") [] (" ++ show b2 ++ ")"
-    show (Parallel gs b1 b2) = "(" ++ show b1 ++ ") |[" ++ intercalate ", " gs ++ "]| (" ++ show b2 ++ ")"
+    show (Parallel gs b1 b2) = "(" ++ show b1 ++ ") |[" ++ intercalate ", " (map name2String gs) ++ "]| (" ++ show b2 ++ ")"
     show (Interleaving b1 b2) = "(" ++ show b1 ++ ") ||| (" ++ show b2 ++ ")"
     show (Synchronization b1 b2) = "(" ++ show b1 ++ ") || (" ++ show b2 ++ ")"
-    show (Hide gs b) = unwords ("hide" : [intercalate ", " gs, "in", "(" ++ show b ++ ")"])
+    show (Hide gs b) = unwords ("hide" : [intercalate ", " (map name2String gs), "in", "(" ++ show b ++ ")"])
     show (Process name []) = name
-    show (Process name gs) = name ++ " " ++ "[" ++ intercalate ", " gs ++ "]"
+    show (Process name gs) = name ++ " " ++ "[" ++ intercalate ", " (map name2String gs) ++ "]"
     show (Exit []) = "exit"
     show (Exit gs) = "exit(" ++ intercalate ", " (map show gs) ++ ")"
     show (Sequence b1 binding) = let (accept, b2) = unsafeUnbind binding in "(" ++ show b1 ++ ") >> " ++

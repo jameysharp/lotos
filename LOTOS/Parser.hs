@@ -30,7 +30,7 @@ variableName :: Stream s m Char => ParsecT s u m Variable
 variableName = s2n <$> T.identifier lexer <?> "variable name"
 
 gateName :: Stream s m Char => ParsecT s u m Gate
-gateName = T.identifier lexer <?> "gate name"
+gateName = s2n <$> T.identifier lexer <?> "gate name"
 
 processName :: Stream s m Char => ParsecT s u m String
 processName = T.identifier lexer <?> "process name"
