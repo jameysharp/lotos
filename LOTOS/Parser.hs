@@ -9,7 +9,7 @@ import Control.Monad
 import Text.Parsec hiding ((<|>), many)
 import Text.Parsec.Expr
 import qualified Text.Parsec.Token as T
-import Unbound.LocallyNameless (s2n)
+import Unbound.LocallyNameless hiding (Infix)
 
 lexer :: Stream s m Char => T.GenTokenParser s u m
 lexer = T.makeTokenParser $ T.LanguageDef {
@@ -42,7 +42,7 @@ expression =
 
 gateValue :: Stream s m Char => ParsecT s u m GateValue
 gateValue =
-    ValueDeclaration <$ char '!' <*> expression
+    ValueDeclaration <$ char '!' <*> (Embed <$> expression)
     <|>
     VariableDeclaration <$ char '?' <*> variableName
     <?> "gate parameter"
@@ -65,14 +65,20 @@ behavior =
 
     parallelOp = Parallel <$> between (opname "|[") (opname "]|") (commaSep gateName)
 
-    sequenceOp = Sequence <$ opname ">>" <*> option [] (between (reserved "accept") (reserved "in") (commaSep1 variableName))
+    sequenceOp = do
+        opname ">>"
+        names <- option [] (between (reserved "accept") (reserved "in") (commaSep1 variableName))
+        return $ \ b1 b2 -> Sequence b1 (bind names b2)
 
     term =
         parens behavior
         <|> Stop <$ reserved "stop"
         <|> Exit <$ reserved "exit" <*> option [] (parens $ commaSep1 exitExpression)
         -- can't lexically distinguish gateName from processName; try both
-        <|> try (Action <$> gateName <*> many gateValue <* semi) <*> term
+        <|> do
+            (gate, vs) <- try ((,) <$> gateName <*> many gateValue <* semi)
+            b <- term
+            return $ Action gate $ bind vs b
         -- need a `try` here to disambiguate between a bracketed gate-list and a following Choice/Preempt operator
         <|> Process <$> processName <*> option [] (try $ brackets $ commaSep1 gateName)
 

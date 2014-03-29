@@ -4,6 +4,8 @@ import LOTOS.AST
 
 import Data.Function
 import qualified Data.Map as Map
+import Unbound.LocallyNameless
+import Unbound.LocallyNameless.Ops
 
 data Trace = TraceExit | Trace (Map.Map Gate Trace)
 
@@ -16,11 +18,11 @@ untraceBehavior (Trace t) = case map extract $ Map.toList t of
     [] -> Stop
     x:xs -> foldl Choice x xs
     where
-    extract (g, t') = Action g [] $ untraceBehavior t'
+    extract (g, t') = Action g $ bind [] $ untraceBehavior t'
 
 traceBehavior :: Behavior -> Trace
 traceBehavior Stop = Trace Map.empty
-traceBehavior (Action g _ b) = Trace $ Map.singleton g $ traceBehavior b
+traceBehavior (Action g binding) = let (_, b) = unsafeUnbind binding in Trace $ Map.singleton g $ traceBehavior b
 traceBehavior (Choice b1 b2) = (joinChoiceTrace `on` traceBehavior) b1 b2
 traceBehavior (Parallel sync b1 b2) = (synchronizeTrace (`elem` sync) `on` traceBehavior) b1 b2
 traceBehavior (Interleaving b1 b2) = (synchronizeTrace (const False) `on` traceBehavior) b1 b2
@@ -28,7 +30,7 @@ traceBehavior (Synchronization b1 b2) = (synchronizeTrace (const True) `on` trac
 traceBehavior (Hide _ b) = traceBehavior b
 traceBehavior (Process{}) = Trace Map.empty -- FIXME: ought to recurse on the named Process
 traceBehavior (Exit _) = TraceExit
-traceBehavior (Sequence _ b1 b2) = replaceTraceExit (traceBehavior b2) $ traceBehavior b1
+traceBehavior (Sequence b1 binding) = let (_, b2) = unsafeUnbind binding in replaceTraceExit (traceBehavior b2) $ traceBehavior b1
 traceBehavior (Preempt b1 b2) = preempt $ traceBehavior b1
     where
     preempt t = joinChoiceTrace (mapTrace preempt t) $ traceBehavior b2
