@@ -8,7 +8,6 @@ import Control.Arrow
 import Control.Monad
 import Data.Function
 import Data.List
-import Data.Maybe
 import qualified Data.Set as Set
 import Generics.RepLib
 import Unbound.LocallyNameless hiding (union)
@@ -112,7 +111,7 @@ impossibleGates :: (Fresh m, Applicative m) => [Gate] -> Behavior -> m Behavior
 impossibleGates [] b = return b
 impossibleGates gates (Action g _) | g `elem` gates = return Stop
 impossibleGates gates (Hide gates' b) = impossibleGates (gates \\ gates') b
-impossibleGates gates p@(Process name gates') | not (null (gates `intersect` gates')) = return $ Parallel (gates `intersect` gates') p Stop
+impossibleGates gates p@(Process _ gates') | not (null (gates `intersect` gates')) = return $ Parallel (gates `intersect` gates') p Stop
 impossibleGates gates b = descendBehavior (impossibleGates gates) b
 
 interleavingBranches :: Behavior -> [Behavior]

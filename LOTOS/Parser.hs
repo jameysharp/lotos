@@ -66,7 +66,7 @@ behavior =
     parallelOp = Parallel <$> between (opname "|[") (opname "]|") (commaSep gateName)
 
     sequenceOp = do
-        opname ">>"
+        _ <- opname ">>"
         names <- option [] (between (reserved "accept") (reserved "in") (commaSep1 variableName))
         return $ \ b1 b2 -> Sequence b1 (bind names b2)
 

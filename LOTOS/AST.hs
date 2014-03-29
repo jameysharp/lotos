@@ -8,7 +8,6 @@ module LOTOS.AST where
 
 import Control.Applicative
 import Data.List
-import Data.Maybe
 import Generics.RepLib
 import Unbound.LocallyNameless
 import Unbound.LocallyNameless.Ops
@@ -99,6 +98,6 @@ descendBehavior f b = gmapM (mkM f) b
 -- subtreesBehavior is like subtrees but collects behaviors immediately below bindings too.
 -- XXX: probably ought to unbind safely but I'm only using this in contexts that ignore variable names.
 subtreesBehavior :: Behavior -> [Behavior]
-subtreesBehavior (Action g binding) = let (_, b) = unsafeUnbind binding in [b]
+subtreesBehavior (Action _ binding) = let (_, b) = unsafeUnbind binding in [b]
 subtreesBehavior (Sequence b1 binding) = let (_, b2) = unsafeUnbind binding in [b1, b2]
 subtreesBehavior b = subtrees b

@@ -20,6 +20,7 @@ library
                        LOTOS.Simplify,
                        LOTOS.Trace
   -- other-modules:       
+  ghc-options:         -Wall -fno-warn-name-shadowing -fno-warn-incomplete-patterns
   build-depends:       base ==4.6.*,
                        containers ==0.5.*,
                        parsec ==3.1.*,

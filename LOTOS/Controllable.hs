@@ -10,7 +10,6 @@ import Control.Monad.Trans.Writer
 import Data.List
 import Data.Maybe
 import qualified Data.Map as Map
-import Data.Monoid
 import Generics.RepLib
 import Unbound.LocallyNameless
 
