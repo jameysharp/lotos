@@ -22,7 +22,7 @@ instance Alpha Expression
 instance Subst Expression Expression
 
 instance Show Expression where
-    show (Variable name) = name2String name
+    show (Variable name) = show name
 
 data ExitExpression = ExitExpression Expression | ExitAny
     deriving Eq
@@ -43,7 +43,7 @@ instance Subst Expression GateValue
 
 instance Show GateValue where
     show (ValueDeclaration (Embed expr)) = '!' : show expr
-    show (VariableDeclaration name) = '?' : name2String name
+    show (VariableDeclaration name) = '?' : show name
 
 type Gate = Name GateInstance
 
@@ -69,20 +69,20 @@ instance Subst Expression Behavior
 
 instance Show Behavior where
     show Stop = "stop"
-    show (Action g binding) = let (vs, b) = unsafeUnbind binding in unwords (name2String g : map show vs) ++ "; " ++ show b
+    show (Action g binding) = let (vs, b) = unsafeUnbind binding in unwords (show g : map show vs) ++ "; " ++ show b
     show (Choice b1 b2) = "(" ++ show b1 ++ ") [] (" ++ show b2 ++ ")"
-    show (Parallel gs b1 b2) = "(" ++ show b1 ++ ") |[" ++ intercalate ", " (map name2String gs) ++ "]| (" ++ show b2 ++ ")"
+    show (Parallel gs b1 b2) = "(" ++ show b1 ++ ") |[" ++ intercalate ", " (map show gs) ++ "]| (" ++ show b2 ++ ")"
     show (Interleaving b1 b2) = "(" ++ show b1 ++ ") ||| (" ++ show b2 ++ ")"
     show (Synchronization b1 b2) = "(" ++ show b1 ++ ") || (" ++ show b2 ++ ")"
-    show (Hide binding) = let (gs, b) = unsafeUnbind binding in unwords ("hide" : [intercalate ", " (map name2String gs), "in", "(" ++ show b ++ ")"])
+    show (Hide binding) = let (gs, b) = unsafeUnbind binding in unwords ("hide" : [intercalate ", " (map show gs), "in", "(" ++ show b ++ ")"])
     show (Process name []) = name
-    show (Process name gs) = name ++ " " ++ "[" ++ intercalate ", " (map name2String gs) ++ "]"
+    show (Process name gs) = name ++ " " ++ "[" ++ intercalate ", " (map show gs) ++ "]"
     show (Exit []) = "exit"
     show (Exit gs) = "exit(" ++ intercalate ", " (map show gs) ++ ")"
     show (Sequence b1 binding) = let (accept, b2) = unsafeUnbind binding in "(" ++ show b1 ++ ") >> " ++
         case accept of
         [] -> "(" ++ show b2 ++ ")"
-        _ -> unwords ("accept" : [intercalate ", " $ map name2String accept, "in", "(" ++ show b2 ++ ")"])
+        _ -> unwords ("accept" : [intercalate ", " $ map show accept, "in", "(" ++ show b2 ++ ")"])
     show (Preempt b1 b2) = "(" ++ show b1 ++ ") [> (" ++ show b2 ++ ")"
 
 -- descendBehavior is like gmapM but collects behaviors immediately below bindings too.
