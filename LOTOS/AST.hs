@@ -19,7 +19,9 @@ newtype Expression = Variable Variable
 
 $(derive [''Expression])
 instance Alpha Expression
-instance Subst Expression Expression
+
+instance Subst Expression Expression where
+    isvar (Variable name) = Just $ SubstName name
 
 instance Show Expression where
     show (Variable name) = show name
