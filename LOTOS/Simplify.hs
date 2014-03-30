@@ -14,7 +14,10 @@ import Unbound.LocallyNameless hiding (union)
 import Unbound.LocallyNameless.Ops
 
 simplify :: Behavior -> Behavior
-simplify = runFreshM . (everywhereM $ mkM simplifyOnce)
+simplify = runFreshM . simplify'
+
+simplify' :: Behavior -> FreshM Behavior
+simplify' b = simplifyOnce =<< descendBehavior simplify' b
 
 -- Note: If any rule introduces a constructor that appears in some rule's pattern, be sure to apply `simplifyOnce` recursively.
 simplifyOnce :: Behavior -> FreshM Behavior
