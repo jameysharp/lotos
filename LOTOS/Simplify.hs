@@ -6,6 +6,9 @@ import LOTOS.AST
 import Control.Applicative
 import Control.Arrow
 import Control.Monad
+import Control.Monad.Trans.Class
+import Control.Monad.Trans.Maybe
+import Control.Monad.Trans.Writer
 import Data.Function
 import Data.List
 import qualified Data.Set as Set
@@ -69,15 +72,59 @@ parallelB sync b1 b2 = do
     emitInterleavings (x:xs) = foldM (\ b1' b2' -> interleavingB b1' b2') x xs
     filterInPartition p = filter ((`elem` p) . snd)
     emitParallel l r = case (l, r) of
-        ([], _) -> r'
-        (_, []) -> l'
-        _ -> Parallel (lsync `union` rsync) <$> l' <*> r'
+        ([], _) -> simplify_r
+        (_, []) -> simplify_l
+        _ -> do
+            l' <- simplify_l
+            r' <- simplify_r
+            broken <- runMaybeT $ (,) <$> breakGates sync' l' <*> breakGates sync' r'
+            case broken of
+                Just ((leadl, namesl, (gl, bindingl)), (leadr, namesr, (gr, bindingr))) -> do
+                    (after, toMerge) <- if gl /= gr then return (Stop, []) else unifyAction sync' gl bindingl bindingr
+                    let (mergel, merger) = unzip toMerge
+                    let namesl' = namesl \\ mergel
+                    let namesr' = namesr \\ merger
+                    let exitVars = map (ExitExpression . Variable)
+                    let exitAnys = map (const ExitAny)
+                    let removeMerges names merges vs = [ v | (name, v) <- zip names vs, name `notElem` merges ]
+                    leadl' <- insertBeforeExit (\ vs -> Exit $ exitVars mergel ++ removeMerges namesl mergel vs ++ exitAnys namesr') namesl leadl
+                    leadr' <- insertBeforeExit (\ vs -> Exit $ exitVars merger ++ exitAnys namesl' ++ removeMerges namesr merger vs) namesr leadr
+                    lead <- interleavingB leadl' leadr'
+                    sequenceB lead (mergel ++ namesl' ++ namesr') after
+                _ -> return $ Parallel sync' l' r'
         where
         simpleGates g branches = emitInterleavings branches >>= impossibleGates g
+        sync' = lsync `union` rsync
         lsync = Set.toList $ Set.unions $ map snd l
-        l' = simpleGates (lsync \\ rsync) $ map fst l
+        simplify_l = simpleGates (lsync \\ rsync) $ map fst l
         rsync = Set.toList $ Set.unions $ map snd r
-        r' = simpleGates (rsync \\ lsync) $ map fst r
+        simplify_r = simpleGates (rsync \\ lsync) $ map fst r
+
+breakGates :: [Gate] -> Behavior -> MaybeT FreshM (Behavior, [Variable], (Gate, Bind [GateValue] Behavior))
+breakGates gs (Action g binding) | g `elem` gs = return (Exit [], [], (g, binding))
+breakGates gs (Action g binding) = do
+    (vs, b) <- unbind binding
+    (next, names, rest) <- breakGates gs b
+    let names' = Set.toList $ binders vs `Set.intersection` fv rest
+    next' <- lift $ insertBeforeExit (\ vs' -> Exit $ map (ExitExpression . Variable) names' ++ vs') names next
+    return (Action g $ bind vs next', names' ++ names, rest)
+breakGates _ _ = mzero
+
+unifyAction :: [Gate] -> Gate -> Bind [GateValue] Behavior -> Bind [GateValue] Behavior -> FreshM (Behavior, [(Variable, Variable)])
+unifyAction sync g bindingl bindingr = do
+    (vsl, bl) <- unbind bindingl
+    (vsr, br) <- unbind bindingr
+    let (unified, toMerge) = runWriter $ zipWithM unifyGateValue vsl vsr
+    let (vsnames, vs) = unzip unified
+    let push decls = substs [(old, Variable new) | (VariableDeclaration old, new) <- zip decls vsnames ]
+    after <- parallelB sync (push vsl bl) (push vsr br)
+    return (Action g $ bind vs after, toMerge)
+
+unifyGateValue :: GateValue -> GateValue -> Writer [(Variable, Variable)] (Variable, GateValue)
+unifyGateValue v@(ValueDeclaration (Embed (Variable name1))) (ValueDeclaration (Embed (Variable name2))) = writer ((name1, v), [(name1, name2)])
+unifyGateValue v@(ValueDeclaration (Embed (Variable name))) (VariableDeclaration _) = return (name, v)
+unifyGateValue (VariableDeclaration _) v@(ValueDeclaration (Embed (Variable name))) = return (name, v)
+unifyGateValue v@(VariableDeclaration name) (VariableDeclaration _) = return (name, v)
 
 synchronizationB :: Behavior -> Behavior -> FreshM Behavior
 synchronizationB (Exit v1) (Exit v2) | Just merged <- unifyExits v1 v2 = return $ Exit merged
