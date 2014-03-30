@@ -72,7 +72,7 @@ flatten :: (Behavior, Behavior, [Variable], Behavior) -> Behavior
 flatten (l, r, names, b) = Sequence (Interleaving l r) $ bind names b
 
 sample :: Behavior
-sample = simplify $ uncontrolled [s2n "os.req", s2n "dev.irq"] $ Hide class_gates $ parallelB class_gates os_spec dev_spec
+sample = simplify $ uncontrolled [s2n "os.req", s2n "dev.irq"] $ Hide $ bind class_gates $ parallelB class_gates os_spec dev_spec
 
 class_gates :: [Gate]
 class_gates = [s2n "class.send", s2n "class.ok", s2n "class.err"]

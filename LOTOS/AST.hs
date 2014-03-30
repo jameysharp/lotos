@@ -57,7 +57,7 @@ data Behavior
     | Parallel [Gate] Behavior Behavior
     | Interleaving Behavior Behavior
     | Synchronization Behavior Behavior
-    | Hide [Gate] Behavior
+    | Hide (Bind [Gate] Behavior)
     | Process String [Gate]
     | Exit [ExitExpression]
     | Sequence Behavior (Bind [Variable] Behavior)
@@ -74,7 +74,7 @@ instance Show Behavior where
     show (Parallel gs b1 b2) = "(" ++ show b1 ++ ") |[" ++ intercalate ", " (map name2String gs) ++ "]| (" ++ show b2 ++ ")"
     show (Interleaving b1 b2) = "(" ++ show b1 ++ ") ||| (" ++ show b2 ++ ")"
     show (Synchronization b1 b2) = "(" ++ show b1 ++ ") || (" ++ show b2 ++ ")"
-    show (Hide gs b) = unwords ("hide" : [intercalate ", " (map name2String gs), "in", "(" ++ show b ++ ")"])
+    show (Hide binding) = let (gs, b) = unsafeUnbind binding in unwords ("hide" : [intercalate ", " (map name2String gs), "in", "(" ++ show b ++ ")"])
     show (Process name []) = name
     show (Process name gs) = name ++ " " ++ "[" ++ intercalate ", " (map name2String gs) ++ "]"
     show (Exit []) = "exit"
@@ -93,11 +93,7 @@ descendBehavior f (Action g binding) = do
 descendBehavior f (Sequence b1 binding) = do
     (names, b2) <- unbind binding
     Sequence <$> f b1 <*> (bind names <$> f b2)
+descendBehavior f (Hide binding) = do
+    (gs, b) <- unbind binding
+    Hide <$> (bind gs <$> f b)
 descendBehavior f b = gmapM (mkM f) b
-
--- subtreesBehavior is like subtrees but collects behaviors immediately below bindings too.
--- XXX: probably ought to unbind safely but I'm only using this in contexts that ignore variable names.
-subtreesBehavior :: Behavior -> [Behavior]
-subtreesBehavior (Action _ binding) = let (_, b) = unsafeUnbind binding in [b]
-subtreesBehavior (Sequence b1 binding) = let (_, b2) = unsafeUnbind binding in [b1, b2]
-subtreesBehavior b = subtrees b

@@ -27,7 +27,7 @@ traceBehavior (Choice b1 b2) = (joinChoiceTrace `on` traceBehavior) b1 b2
 traceBehavior (Parallel sync b1 b2) = (synchronizeTrace (`elem` sync) `on` traceBehavior) b1 b2
 traceBehavior (Interleaving b1 b2) = (synchronizeTrace (const False) `on` traceBehavior) b1 b2
 traceBehavior (Synchronization b1 b2) = (synchronizeTrace (const True) `on` traceBehavior) b1 b2
-traceBehavior (Hide _ b) = traceBehavior b
+traceBehavior (Hide binding) = let (_, b) = unsafeUnbind binding in traceBehavior b
 traceBehavior (Process{}) = Trace Map.empty -- FIXME: ought to recurse on the named Process
 traceBehavior (Exit _) = TraceExit
 traceBehavior (Sequence b1 binding) = let (_, b2) = unsafeUnbind binding in replaceTraceExit (traceBehavior b2) $ traceBehavior b1

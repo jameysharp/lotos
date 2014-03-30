@@ -49,7 +49,7 @@ gateValue =
 
 behavior :: Stream s m Char => ParsecT s u m Behavior
 behavior =
-    Hide <$> between (reserved "hide") (reserved "in") (commaSep1 gateName) <*> behavior
+    Hide <$> (bind <$> between (reserved "hide") (reserved "in") (commaSep1 gateName) <*> behavior)
     <|> buildExpressionParser behaviorOperators term
     where
     behaviorOperators = [

@@ -11,7 +11,6 @@ import Data.List
 import qualified Data.Set as Set
 import Generics.RepLib
 import Unbound.LocallyNameless hiding (union)
-import Unbound.LocallyNameless.Ops
 
 simplify :: Behavior -> Behavior
 simplify = runFreshM . simplify'
@@ -26,7 +25,7 @@ simplifyOnce (Sequence b1 binding) = uncurry (sequenceB b1) =<< unbind binding
 simplifyOnce (Parallel sync b1 b2) = parallelB sync b1 b2
 simplifyOnce (Synchronization b1 b2) = synchronizationB b1 b2
 simplifyOnce (Interleaving b1 b2) = interleavingB b1 b2
-simplifyOnce (Hide gs b) = hideB gs b
+simplifyOnce (Hide binding) = uncurry hideB =<< unbind binding
 simplifyOnce (Preempt b1 b2) = preemptB b1 b2
 simplifyOnce b = return b
 
@@ -108,14 +107,16 @@ hideB gs b@(Parallel sync b1 b2) = case partition (`elem` sync) gs of
         b2' <- hideB notInSync b2
         b' <- parallelB sync b1' b2'
         hideB inSync b'
-hideB gs (Hide gs' b) = hideB (gs `union` gs') b
+hideB gs (Hide binding) = do
+    (gs', b) <- unbind binding
+    hideB (gs `union` gs') b
 hideB gs b@(Process{}) = hideB' gs b
 hideB gs b = simplifyOnce =<< descendBehavior (hideB gs) b
 
 hideB' :: [Gate] -> Behavior -> FreshM Behavior
 hideB' gs b = return $ case Set.toList $ Set.fromList gs `gatesFreeIn` b of
     [] -> b
-    gs' -> Hide gs' b
+    gs' -> Hide $ bind gs' b
 
 preemptB :: Behavior -> Behavior -> FreshM Behavior
 preemptB Stop b = return b
@@ -124,7 +125,9 @@ preemptB b1 b2 = return $ Preempt b1 b2
 impossibleGates :: [Gate] -> Behavior -> FreshM Behavior
 impossibleGates [] b = return b
 impossibleGates gates (Action g _) | g `elem` gates = return Stop
-impossibleGates gates (Hide gates' b) = hideB gates' =<< impossibleGates (gates \\ gates') b
+impossibleGates gates (Hide binding) = do
+    (gates', b) <- unbind binding
+    hideB gates' =<< impossibleGates (gates \\ gates') b
 impossibleGates gates p@(Process _ gates') | not (null (gates `intersect` gates')) = return $ Parallel (gates `intersect` gates') p Stop
 impossibleGates gates b = simplifyOnce =<< descendBehavior (impossibleGates gates) b
 
@@ -156,12 +159,4 @@ unifyExits v1 v2 = sequence $ zipWith exitMerge v1 v2
     exitMerge _ _ = Nothing
 
 gatesFreeIn :: Set.Set Gate -> Behavior -> Set.Set Gate
-gatesFreeIn gates _ | Set.null gates = Set.empty
-gatesFreeIn gates (Action g binding) = let (_, b) = unsafeUnbind binding in (if g `Set.member` gates then Set.insert g else id) $ gatesFreeIn (g `Set.delete` gates) b
-gatesFreeIn gates (Parallel gs b1 b2) = gatesFreeIn' ((uncurry Set.difference &&& uncurry Set.intersection) (gates, Set.fromList gs)) [b1, b2]
-gatesFreeIn gates (Hide gs b) = gatesFreeIn (gates `Set.difference` Set.fromList gs) b
-gatesFreeIn gates (Process _ gs) = Set.fromList gs `Set.intersection` gates
-gatesFreeIn gates b = gatesFreeIn' (gates, Set.empty) $ subtreesBehavior b
-
-gatesFreeIn' :: (Set.Set Gate, Set.Set Gate) -> [Behavior] -> Set.Set Gate
-gatesFreeIn' start = snd . foldr (\ b (want, found) -> (Set.difference want &&& Set.union found) $ gatesFreeIn want b) start
+gatesFreeIn gates b = gates `Set.intersection` fv b
