@@ -11,6 +11,7 @@ import Control.Monad.Trans.Maybe
 import Control.Monad.Trans.Writer
 import Data.Function
 import Data.List
+import qualified Data.Map as Map
 import qualified Data.Set as Set
 import Generics.RepLib
 import Unbound.LocallyNameless hiding (union)
@@ -79,8 +80,15 @@ parallelB sync b1 b2 = do
             r' <- simplify_r
             broken <- runMaybeT $ (,) <$> breakGates sync' l' <*> breakGates sync' r'
             case broken of
-                Just ((leadl, namesl, (gl, bindingl)), (leadr, namesr, (gr, bindingr))) -> do
-                    (after, toMerge) <- if gl /= gr then return (Stop, []) else unifyAction sync' gl bindingl bindingr
+                Just ((leadl, namesl, choicesl), (leadr, namesr, choicesr)) -> do
+                    choices <- sequence $ Map.elems $ Map.intersectionWithKey (unifyAction sync') choicesl choicesr
+                    (after, toMerge) <- case choices of
+                        [] -> return (Stop, [])
+                        [x] -> return x
+                        xs | all (null . snd) xs -> do
+                            after <- foldM choiceB (fst $ head xs) (map fst $ tail xs)
+                            return (after, [])
+                        -- FIXME: merge multiple feasible choices
                     let (mergel, merger) = unzip toMerge
                     let namesl' = namesl \\ mergel
                     let namesr' = namesr \\ merger
@@ -100,15 +108,26 @@ parallelB sync b1 b2 = do
         rsync = Set.toList $ Set.unions $ map snd r
         simplify_r = simpleGates (rsync \\ lsync) $ map fst r
 
-breakGates :: [Gate] -> Behavior -> MaybeT FreshM (Behavior, [Variable], (Gate, Bind [GateValue] Behavior))
-breakGates gs (Action g binding) | g `elem` gs = return (Exit [], [], (g, binding))
-breakGates gs (Action g binding) = do
+breakGates :: [Gate] -> Behavior -> MaybeT FreshM (Behavior, [Variable], Map.Map Gate (Bind [GateValue] Behavior))
+breakGates gs (Action g binding) | g `notElem` gs = do
     (vs, b) <- unbind binding
     (next, names, rest) <- breakGates gs b
-    let names' = Set.toList $ binders vs `Set.intersection` fv rest
+    let names' = Set.toList $ binders vs `Set.intersection` fv (Map.elems rest)
     next' <- lift $ insertBeforeExit (\ vs' -> Exit $ map (ExitExpression . Variable) names' ++ vs') names next
     return (Action g $ bind vs next', names' ++ names, rest)
-breakGates _ _ = mzero
+breakGates gs b = do
+    choices <- breakGates' gs b
+    return (Exit [], [], choices)
+
+breakGates' :: [Gate] -> Behavior -> MaybeT FreshM (Map.Map Gate (Bind [GateValue] Behavior))
+breakGates' gs (Action g binding) | g `elem` gs = return $ Map.singleton g binding
+breakGates' gs (Choice b1 b2) = do
+    choices1 <- breakGates' gs b1
+    choices2 <- breakGates' gs b2
+    -- TODO: deal with non-deterministic choice branches?
+    guard $ Set.null $ Map.keysSet choices1 `Set.intersection` Map.keysSet choices2
+    return $ Map.union choices1 choices2
+breakGates' _ _ = mzero
 
 unifyAction :: [Gate] -> Gate -> Bind [GateValue] Behavior -> Bind [GateValue] Behavior -> FreshM (Behavior, [(Variable, Variable)])
 unifyAction sync g bindingl bindingr = do
