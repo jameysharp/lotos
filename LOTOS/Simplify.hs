@@ -92,11 +92,10 @@ parallelB sync b1 b2 = do
                     let (mergel, merger) = unzip toMerge
                     let namesl' = namesl \\ mergel
                     let namesr' = namesr \\ merger
-                    let exitVars = map (ExitExpression . Variable)
                     let exitAnys = map (const ExitAny)
-                    let removeMerges names merges vs = [ v | (name, v) <- zip names vs, name `notElem` merges ]
-                    leadl' <- insertBeforeExit (\ vs -> Exit $ exitVars mergel ++ removeMerges namesl mergel vs ++ exitAnys namesr') namesl leadl
-                    leadr' <- insertBeforeExit (\ vs -> Exit $ exitVars merger ++ exitAnys namesl' ++ removeMerges namesr merger vs) namesr leadr
+                    let extractMerges names merges f = Exit . uncurry (++) . (map snd *** f . map snd) . partition ((`elem` merges) . fst) . zip names
+                    leadl' <- insertBeforeExit (extractMerges namesl mergel (++ exitAnys namesr')) namesl leadl
+                    leadr' <- insertBeforeExit (extractMerges namesr merger (exitAnys namesl' ++)) namesr leadr
                     lead <- interleavingB leadl' leadr'
                     sequenceB lead (mergel ++ namesl' ++ namesr') after
                 _ -> return $ Parallel sync' l' r'
@@ -140,6 +139,7 @@ unifyAction sync g bindingl bindingr = do
     return (Action g $ bind vs after, toMerge)
 
 unifyGateValue :: GateValue -> GateValue -> Writer [(Variable, Variable)] (Variable, GateValue)
+-- NOTE: In this first case, name1 and name2 were free in this action, so it's OK for them to escape their binding.
 unifyGateValue v@(ValueDeclaration (Embed (Variable name1))) (ValueDeclaration (Embed (Variable name2))) = writer ((name1, v), [(name1, name2)])
 unifyGateValue v@(ValueDeclaration (Embed (Variable name))) (VariableDeclaration _) = return (name, v)
 unifyGateValue (VariableDeclaration _) v@(ValueDeclaration (Embed (Variable name))) = return (name, v)
