@@ -80,7 +80,7 @@ codegen' onExit blocking (Interleaving b1 b2) = do
     lift $ tell [(procname, Procedure $ bind [] $ onExit [])] -- FIXME: wait for procname to be called twice and merge the exits
     let onExit' exprs = Continue exprs procname
     Unordered <$> codegen' onExit' blocking b1 <*> codegen' onExit' blocking b2
--- FIXME: handle codegen for Process behaviors
+-- FIXME: handle codegen for Instantiate behaviors
 codegen' onExit _ (Exit vs) | all (/= ExitAny) vs = return $ onExit [ expr | ExitExpression expr <- vs ]
 codegen' onExit blocking (Sequence b1 binding) = do
     (names, b2) <- unbind binding

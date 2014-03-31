@@ -56,7 +56,7 @@ sequenceB b1 names (Exit vs) = replaceExit b1
     replaceExit (Sequence a binding) = do
         (names', b) <- unbind binding
         Sequence a <$> (bind names' <$> replaceExit b)
-    -- FIXME: handle Process
+    -- FIXME: handle Instantiate
     replaceExit b = descendBehavior replaceExit b
 sequenceB b1 names b2 = return $ Sequence b1 $ bind names b2
 
@@ -154,7 +154,7 @@ synchronizationB b1 b2 = return $ Synchronization b1 b2
 interleavingB :: Behavior -> Behavior -> FreshM Behavior
 interleavingB Stop b = insertBeforeExit (const Stop) [] b
 interleavingB a Stop = insertBeforeExit (const Stop) [] a
--- XXX: Not clearly correct if subtree contains a Process or name shadowing.
+-- XXX: Not clearly correct if subtree contains process instantiation.
 interleavingB (Exit vs) b | Just merged <- everywhereM (mkM $ unifyExits vs) b = return merged
 interleavingB a (Exit vs) | Just merged <- everywhereM (mkM $ unifyExits vs) a = return merged
 interleavingB b1 b2 = return $ Interleaving b1 b2
@@ -178,7 +178,7 @@ hideB gs b@(Parallel sync b1 b2) = case partition (`elem` sync) gs of
 hideB gs (Hide binding) = do
     (gs', b) <- unbind binding
     hideB (gs `union` gs') b
-hideB gs b@(Process{}) = hideB' gs b
+hideB gs b@(Instantiate{}) = hideB' gs b
 hideB gs b = simplifyOnce =<< descendBehavior (hideB gs) b
 
 hideB' :: [Gate] -> Behavior -> FreshM Behavior
@@ -196,7 +196,7 @@ impossibleGates gates (Action g _) | g `elem` gates = return Stop
 impossibleGates gates (Hide binding) = do
     (gates', b) <- unbind binding
     hideB gates' =<< impossibleGates (gates \\ gates') b
-impossibleGates gates p@(Process _ gates') | not (null (gates `intersect` gates')) = return $ Parallel (gates `intersect` gates') p Stop
+impossibleGates gates p@(Instantiate _ gates') | not (null (gates `intersect` gates')) = return $ Parallel (gates `intersect` gates') p Stop
 impossibleGates gates b = simplifyOnce =<< descendBehavior (impossibleGates gates) b
 
 interleavingBranches :: Behavior -> [Behavior]
@@ -213,7 +213,7 @@ disjointPartitions (x : xs) = let (disj, conj) = go x xs in (x : conj) : disjoin
 
 insertBeforeExit :: ([ExitExpression] -> Behavior) -> [Variable] -> Behavior -> FreshM Behavior
 insertBeforeExit f _ (Exit vs) = return $ f vs
-insertBeforeExit f results b@(Process{}) = return $ Sequence b $ bind results $ f $ map (ExitExpression . Variable) results
+insertBeforeExit f results b@(Instantiate{}) = return $ Sequence b $ bind results $ f $ map (ExitExpression . Variable) results
 insertBeforeExit f results (Sequence lhs binding) = do
     (names, rhs) <- unbind binding
     Sequence lhs <$> (bind names <$> insertBeforeExit f results rhs)

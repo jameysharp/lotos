@@ -60,7 +60,7 @@ data Behavior
     | Interleaving Behavior Behavior
     | Synchronization Behavior Behavior
     | Hide (Bind [Gate] Behavior)
-    | Process String [Gate]
+    | Instantiate String [Gate]
     | Exit [ExitExpression]
     | Sequence Behavior (Bind [Variable] Behavior)
     | Preempt Behavior Behavior
@@ -77,8 +77,8 @@ instance Show Behavior where
     show (Interleaving b1 b2) = "(" ++ show b1 ++ ") ||| (" ++ show b2 ++ ")"
     show (Synchronization b1 b2) = "(" ++ show b1 ++ ") || (" ++ show b2 ++ ")"
     show (Hide binding) = let (gs, b) = unsafeUnbind binding in unwords ("hide" : [intercalate ", " (map show gs), "in", "(" ++ show b ++ ")"])
-    show (Process name []) = name
-    show (Process name gs) = name ++ " " ++ "[" ++ intercalate ", " (map show gs) ++ "]"
+    show (Instantiate name []) = name
+    show (Instantiate name gs) = name ++ " " ++ "[" ++ intercalate ", " (map show gs) ++ "]"
     show (Exit []) = "exit"
     show (Exit gs) = "exit(" ++ intercalate ", " (map show gs) ++ ")"
     show (Sequence b1 binding) = let (accept, b2) = unsafeUnbind binding in "(" ++ show b1 ++ ") >> " ++

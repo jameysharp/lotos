@@ -28,7 +28,7 @@ traceBehavior (Parallel sync b1 b2) = (synchronizeTrace (`elem` sync) `on` trace
 traceBehavior (Interleaving b1 b2) = (synchronizeTrace (const False) `on` traceBehavior) b1 b2
 traceBehavior (Synchronization b1 b2) = (synchronizeTrace (const True) `on` traceBehavior) b1 b2
 traceBehavior (Hide binding) = let (_, b) = unsafeUnbind binding in traceBehavior b
-traceBehavior (Process{}) = Trace Map.empty -- FIXME: ought to recurse on the named Process
+traceBehavior (Instantiate{}) = Trace Map.empty -- FIXME: ought to recurse on the named Instantiate
 traceBehavior (Exit _) = TraceExit
 traceBehavior (Sequence b1 binding) = let (_, b2) = unsafeUnbind binding in replaceTraceExit (traceBehavior b2) $ traceBehavior b1
 traceBehavior (Preempt b1 b2) = preempt $ traceBehavior b1
