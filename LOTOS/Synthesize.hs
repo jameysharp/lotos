@@ -7,7 +7,6 @@ module LOTOS.Synthesize where
 
 import LOTOS.AST
 import LOTOS.Controllable
-import LOTOS.Simplify
 
 import Control.Applicative
 import Control.Monad.Trans.Class
@@ -60,7 +59,7 @@ instance Show Program where
     show (Program (initial, procs)) = unlines $ [ "function " ++ show procname ++ show body | (procname, body) <- procs ] ++ [show initial]
 
 codegen :: [Gate] -> Behavior -> Program
-codegen blocking b = Program $ runWriter $ runFreshMT $ codegen' (const Return) blocking $ simplify $ uncontrolled blocking b
+codegen blocking b = Program $ runWriter $ runFreshMT $ codegen' (const Return) blocking $ uncontrolled blocking b
 
 codegen' :: ([Expression] -> Statement) -> [Gate] -> Behavior -> FreshMT (Writer [(Name Procedure, Procedure)]) Statement
 codegen' _ _ Stop = return Return

@@ -2,6 +2,7 @@
 module LOTOS.Controllable (uncontrolled) where
 
 import LOTOS.AST
+import LOTOS.Simplify
 
 import Control.Monad
 import Control.Monad.Trans.Class
@@ -14,17 +15,18 @@ import Generics.RepLib
 import Unbound.LocallyNameless
 
 uncontrolled :: [Gate] -> Behavior -> Behavior
-uncontrolled gates b = runFreshM $ uncontrolled' gates b
+uncontrolled gates b = fromMaybe b $ runFreshM $ runMaybeT $ uncontrolled' gates b
 
-uncontrolled' :: [Gate] -> Behavior -> FreshM Behavior
-uncontrolled' gates b = do
+uncontrolled' :: [Gate] -> Behavior -> MaybeT FreshM Behavior
+uncontrolled' gates b = MaybeT $ do
     b' <- runMaybeT $ case b of
         -- If the right side starts with an uncontrolled gate, use that first.
         Interleaving b2 (Action g binding) | g `elem` gates -> extractInterleavedAction g binding b2
         Interleaving (Action g binding) b2 -> extractInterleavedAction g binding b2
         Interleaving b2 (Action g binding) -> extractInterleavedAction g binding b2
-        _ -> return b
-    descendBehavior (uncontrolled' gates) $ fromMaybe b b'
+        _ -> mzero
+    b'' <- runMaybeT $ (lift . simplifyOnce) =<< descendBehavior (uncontrolled' gates) (fromMaybe b b')
+    return $ b'' `mplus` b'
 
 extractInterleavedAction :: Gate -> Bind [GateValue] Behavior -> Behavior -> MaybeT FreshM Behavior
 extractInterleavedAction g binding b2 = do
@@ -34,7 +36,8 @@ extractInterleavedAction g binding b2 = do
     if all (ExitAny ==) common then mzero else do
     (b2', free) <- runWriterT $ unify common b2
     guard $ all Map.null free
-    return $ Action g $ bind v $ Interleaving b1' b2'
+    next <- lift $ interleavingB b1' b2'
+    return $ Action g $ bind v next
 
 unify :: [ExitExpression] -> Behavior -> WriterT [Map.Map Variable Expression] (MaybeT FreshM) Behavior
 unify common (Exit exprs) = writer (unboundExit, [exitBinding]) where

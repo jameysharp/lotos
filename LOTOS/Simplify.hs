@@ -1,5 +1,9 @@
 {-# LANGUAGE PatternGuards #-}
-module LOTOS.Simplify (simplify) where
+module LOTOS.Simplify (
+    simplify,
+    simplifyOnce,
+    choiceB, sequenceB, parallelB, synchronizationB, interleavingB, hideB, preemptB
+) where
 
 import LOTOS.AST
 
