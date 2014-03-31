@@ -1,6 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE RecordWildCards #-}
-module LOTOS.Parser (parseBehavior) where
+module LOTOS.Parser (parseBehavior, parseProcess) where
 
 import LOTOS.AST
 
@@ -21,10 +21,13 @@ lexer = T.makeTokenParser $ T.LanguageDef {
     T.identLetter = alphaNum <|> oneOf "_.",
     T.opStart = mzero,
     T.opLetter = mzero,
-    T.reservedNames = ["any", "stop", "hide", "accept", "in", "exit"],
+    T.reservedNames = ["any", "stop", "hide", "accept", "in", "exit", "where", "process", "endproc"],
     T.reservedOpNames = [],
     T.caseSensitive = True
 }
+
+opname :: Stream s m Char => String -> ParsecT s u m String
+opname = T.lexeme lexer . try . string
 
 variableName :: Stream s m Char => ParsecT s u m Variable
 variableName = s2n <$> T.identifier lexer <?> "variable name"
@@ -32,8 +35,8 @@ variableName = s2n <$> T.identifier lexer <?> "variable name"
 gateName :: Stream s m Char => ParsecT s u m Gate
 gateName = s2n <$> T.identifier lexer <?> "gate name"
 
-processName :: Stream s m Char => ParsecT s u m String
-processName = T.identifier lexer <?> "process name"
+processName :: Stream s m Char => ParsecT s u m (Name Process)
+processName = s2n <$> T.identifier lexer <?> "process name"
 
 expression :: Stream s m Char => ParsecT s u m Expression
 expression =
@@ -60,7 +63,6 @@ behavior =
         ]
 
     T.TokenParser { .. } = lexer
-    opname = lexeme . try . string
     binop tok op assoc = Infix (op <$ opname tok) assoc
 
     parallelOp = Parallel <$> between (opname "|[") (opname "]|") (commaSep gateName)
@@ -84,5 +86,22 @@ behavior =
 
     exitExpression = ExitAny <$ reserved "any" <|> ExitExpression <$> expression
 
+process :: Stream s m Char => ParsecT s u m Process
+process = do
+    reserved "process"
+    procname <- processName
+    gates <- option [] (brackets $ commaSep1 gateName)
+    params <- option [] (parens $ commaSep1 variableName)
+    _ <- opname ":="
+    b <- behavior
+    procs <- option [] (reserved "where" >> many1 process)
+    reserved "endproc"
+    return $ Process procname $ Embed $ bind (gates, params) $ bind (rec procs) b
+    where
+    T.TokenParser { .. } = lexer
+
 parseBehavior :: SourceName -> String -> Either ParseError Behavior
 parseBehavior = parse (T.whiteSpace lexer *> behavior <* eof)
+
+parseProcess :: SourceName -> String -> Either ParseError Process
+parseProcess = parse (T.whiteSpace lexer *> process <* eof)

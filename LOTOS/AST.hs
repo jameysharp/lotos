@@ -60,12 +60,11 @@ data Behavior
     | Interleaving Behavior Behavior
     | Synchronization Behavior Behavior
     | Hide (Bind [Gate] Behavior)
-    | Instantiate String [Gate]
+    | Instantiate (Name Process) [Gate]
     | Exit [ExitExpression]
     | Sequence Behavior (Bind [Variable] Behavior)
     | Preempt Behavior Behavior
 
-$(derive [''Behavior])
 instance Alpha Behavior
 instance Subst Expression Behavior
 
@@ -77,8 +76,8 @@ instance Show Behavior where
     show (Interleaving b1 b2) = "(" ++ show b1 ++ ") ||| (" ++ show b2 ++ ")"
     show (Synchronization b1 b2) = "(" ++ show b1 ++ ") || (" ++ show b2 ++ ")"
     show (Hide binding) = let (gs, b) = unsafeUnbind binding in unwords ("hide" : [intercalate ", " (map show gs), "in", "(" ++ show b ++ ")"])
-    show (Instantiate name []) = name
-    show (Instantiate name gs) = name ++ " " ++ "[" ++ intercalate ", " (map show gs) ++ "]"
+    show (Instantiate name []) = show name
+    show (Instantiate name gs) = show name ++ " " ++ "[" ++ intercalate ", " (map show gs) ++ "]"
     show (Exit []) = "exit"
     show (Exit gs) = "exit(" ++ intercalate ", " (map show gs) ++ ")"
     show (Sequence b1 binding) = let (accept, b2) = unsafeUnbind binding in "(" ++ show b1 ++ ") >> " ++
@@ -86,6 +85,22 @@ instance Show Behavior where
         [] -> "(" ++ show b2 ++ ")"
         _ -> unwords ("accept" : [intercalate ", " $ map show accept, "in", "(" ++ show b2 ++ ")"])
     show (Preempt b1 b2) = "(" ++ show b1 ++ ") [> (" ++ show b2 ++ ")"
+
+data Process = Process (Name Process) (Embed (Bind ([Gate], [Variable]) (Bind (Rec [Process]) Behavior)))
+
+$(derive [''Behavior, ''Process])
+instance Alpha Process
+instance Subst Expression Process
+
+instance Show Process where
+    show (Process procname (Embed binding)) =
+        let ((gates, params), binding') = unsafeUnbind binding
+            (recProcs, b) = unsafeUnbind binding'
+            procs = unrec recProcs
+            gateStr = if null gates then "" else " [" ++ intercalate ", " (map show gates) ++ "]"
+            paramStr = if null params then "" else " (" ++ intercalate ", " (map show params) ++ ")"
+            procStr = if null procs then "" else unwords $ " where" : map show procs
+        in "process " ++ show procname ++ gateStr ++ paramStr ++ " := " ++ show b ++ procStr ++ " endproc"
 
 -- descendBehavior is like gmapM but collects behaviors immediately below bindings too.
 descendBehavior :: (Fresh m, Applicative m) => (Behavior -> m Behavior) -> Behavior -> m Behavior
