@@ -1,14 +1,11 @@
 module LOTOS where
 
 import LOTOS.AST
-import LOTOS.Controllable
 import LOTOS.Parser
 import LOTOS.Simplify
+import LOTOS.Synthesize
 
 import Unbound.LocallyNameless
-
-codegen :: [Gate] -> [Gate] -> Behavior -> Behavior -> Behavior
-codegen u c b1 b2 = simplify $ uncontrolled u $ simplify $ Hide $ bind c $ Parallel c b1 b2
 
 simpleParse :: String -> Behavior
 simpleParse s = case parseBehavior "" s of
@@ -27,7 +24,15 @@ dev_recv_spec = simpleParse "dev.receive ?packet; class.receive !packet; exit"
 os_spec = Interleaving os_send_spec os_recv_spec
 dev_spec = Interleaving dev_send_spec dev_recv_spec
 
+make_sample :: [Gate] -> Behavior -> Behavior -> Behavior
+make_sample classes b1 b2 = simplify $ Hide $ bind classes $ Parallel classes b1 b2
+
 send_sample, recv_sample, full_sample :: Behavior
-send_sample = codegen uncontrolled_gates class_gates os_send_spec dev_send_spec
-recv_sample = codegen uncontrolled_gates class_gates os_recv_spec dev_recv_spec
-full_sample = codegen uncontrolled_gates class_gates os_spec dev_spec
+send_sample = make_sample class_gates os_send_spec dev_send_spec
+recv_sample = make_sample class_gates os_recv_spec dev_recv_spec
+full_sample = make_sample class_gates os_spec dev_spec
+
+cg_send, cg_recv, cg_full :: Program
+cg_send = codegen uncontrolled_gates send_sample
+cg_recv = codegen uncontrolled_gates recv_sample
+cg_full = codegen uncontrolled_gates full_sample
