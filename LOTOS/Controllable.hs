@@ -35,28 +35,28 @@ extractInterleavedAction g binding b2 = do
     (b2', free) <- runWriterT $ unify common b2
     guard $ all Map.null free
     return $ Action g $ bind v $ Interleaving b1' b2'
-    where
-    unify :: [ExitExpression] -> Behavior -> WriterT [Map.Map Variable Expression] (MaybeT FreshM) Behavior
-    unify common (Exit exprs) = writer (unboundExit, [exitBinding]) where
-        unboundExit = Exit [ case l of ExitAny -> r; _ -> ExitAny | (l, r) <- zip common exprs ]
-        exitBinding = Map.fromList [ (var, expr) | (ExitExpression expr, ExitExpression (Variable var)) <- zip common exprs ]
-    unify common (Action g binding) = do
-        (vs, b) <- unbind binding
-        (b', bindings) <- lift $ runWriterT $ unify common b
-        vs' <- case bindings of
-            [] -> return vs
-            [binding] -> do
-                let updatingDecl (VariableDeclaration var)
-                        | Just expr <- Map.lookup var binding = writer (ValueDeclaration $ Embed expr, [var])
-                    updatingDecl d = return d
-                let (vs', shadowed) = runWriter $ mapM updatingDecl vs
-                writer (vs', [foldr Map.delete binding shadowed])
-            _ -> error "LOTOS.Controllable internal error: too many bindings from Action"
-        return $ Action g $ bind vs' b'
-    unify common b = do
-        (b', bindings) <- lift $ runWriterT $ descendBehavior (unify common) b
-        guard $ same bindings
-        writer (b', take 1 bindings)
+
+unify :: [ExitExpression] -> Behavior -> WriterT [Map.Map Variable Expression] (MaybeT FreshM) Behavior
+unify common (Exit exprs) = writer (unboundExit, [exitBinding]) where
+    unboundExit = Exit [ case l of ExitAny -> r; _ -> ExitAny | (l, r) <- zip common exprs ]
+    exitBinding = Map.fromList [ (var, expr) | (ExitExpression expr, ExitExpression (Variable var)) <- zip common exprs ]
+unify common (Action g binding) = do
+    (vs, b) <- unbind binding
+    (b', bindings) <- lift $ runWriterT $ unify common b
+    vs' <- case bindings of
+        [] -> return vs
+        [binding] -> do
+            let updatingDecl (VariableDeclaration var)
+                    | Just expr <- Map.lookup var binding = writer (ValueDeclaration $ Embed expr, [var])
+                updatingDecl d = return d
+            let (vs', shadowed) = runWriter $ mapM updatingDecl vs
+            writer (vs', [foldr Map.delete binding shadowed])
+        _ -> error "LOTOS.Controllable internal error: too many bindings from Action"
+    return $ Action g $ bind vs' b'
+unify common b = do
+    (b', bindings) <- lift $ runWriterT $ descendBehavior (unify common) b
+    guard $ same bindings
+    writer (b', take 1 bindings)
 
 exits :: Behavior -> [[ExitExpression]]
 exits b = [exprs | Exit exprs <- listify (const True) b] -- FIXME: exclude Exits from Sequence LHS
