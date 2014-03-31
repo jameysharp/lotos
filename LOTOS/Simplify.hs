@@ -12,6 +12,7 @@ import Control.Monad.Trans.Writer
 import Data.Function
 import Data.List
 import qualified Data.Map as Map
+import Data.Maybe
 import qualified Data.Set as Set
 import Generics.RepLib
 import Unbound.LocallyNameless hiding (union)
@@ -78,17 +79,18 @@ parallelB sync b1 b2 = do
         _ -> do
             l' <- simplify_l
             r' <- simplify_r
-            broken <- runMaybeT $ (,) <$> breakGates sync' l' <*> breakGates sync' r'
-            case broken of
-                Just ((leadl, namesl, choicesl), (leadr, namesr, choicesr)) -> do
-                    choices <- sequence $ Map.elems $ Map.intersectionWithKey (unifyAction sync') choicesl choicesr
-                    (after, toMerge) <- case choices of
-                        [] -> return (Stop, [])
-                        [x] -> return x
-                        xs | all (null . snd) xs -> do
-                            after <- foldM choiceB (fst $ head xs) (map fst $ tail xs)
-                            return (after, [])
-                        -- FIXME: merge multiple feasible choices
+            liftM (fromMaybe $ Parallel sync' l' r') $ runMaybeT $ do
+                (leadl, namesl, choicesl) <- breakGates sync' l'
+                (leadr, namesr, choicesr) <- breakGates sync' r'
+                choices <- lift $ sequence $ Map.elems $ Map.intersectionWithKey (unifyAction sync') choicesl choicesr
+                (after, toMerge) <- case choices of
+                    [] -> return (Stop, [])
+                    [x] -> return x
+                    xs | all (null . snd) xs -> do
+                        after <- lift $ foldM choiceB (fst $ head xs) (map fst $ tail xs)
+                        return (after, [])
+                    _ -> mzero -- FIXME: merge multiple feasible choices
+                lift $ do
                     let (mergel, merger) = unzip toMerge
                     let namesl' = namesl \\ mergel
                     let namesr' = namesr \\ merger
@@ -98,7 +100,6 @@ parallelB sync b1 b2 = do
                     leadr' <- insertBeforeExit (extractMerges namesr merger (exitAnys namesl' ++)) namesr leadr
                     lead <- interleavingB leadl' leadr'
                     sequenceB lead (mergel ++ namesl' ++ namesr') after
-                _ -> return $ Parallel sync' l' r'
         where
         simpleGates g branches = emitInterleavings branches >>= impossibleGates g
         sync' = lsync `union` rsync
