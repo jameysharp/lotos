@@ -30,10 +30,10 @@ extractInterleavedAction :: Gate -> Bind [GateValue] Behavior -> Behavior -> May
 extractInterleavedAction g binding b2 = do
     (v, b1') <- unbind binding
     common <- commonExit $ map (exitOf [name | VariableDeclaration name <- v]) $ exits b1'
-    b2' <- if all (ExitAny ==) common then return b2 else do
-        (b2', free) <- runWriterT $ unify common b2
-        guard $ all Map.null free
-        return b2'
+    -- Only extract if it might unify with b2's exits.
+    if all (ExitAny ==) common then mzero else do
+    (b2', free) <- runWriterT $ unify common b2
+    guard $ all Map.null free
     return $ Action g $ bind v $ Interleaving b1' b2'
     where
     unify :: [ExitExpression] -> Behavior -> WriterT [Map.Map Variable Expression] (MaybeT FreshM) Behavior
