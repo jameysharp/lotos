@@ -51,10 +51,11 @@ extractInterleavedAction g binding b2 = do
                     updatingDecl d = return d
                 let (vs', shadowed) = runWriter $ mapM updatingDecl vs
                 writer (vs', [foldr Map.delete binding shadowed])
+            _ -> error "LOTOS.Controllable internal error: too many bindings from Action"
         return $ Action g $ bind vs' b'
     unify common b = do
         (b', bindings) <- lift $ runWriterT $ descendBehavior (unify common) b
-        guard $ null bindings || same bindings
+        guard $ same bindings
         writer (b', take 1 bindings)
 
 exits :: Behavior -> [[ExitExpression]]
@@ -67,6 +68,7 @@ exitOf names = map restrict
     restrict _ = ExitAny
 
 same :: Eq a => [a] -> Bool
+same [] = True
 same (x:xs) = all (x ==) xs
 
 commonExit :: (Monad m, MonadPlus m) => [[ExitExpression]] -> m [ExitExpression]

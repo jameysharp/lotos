@@ -71,6 +71,7 @@ parallelB sync b1 b2 = do
     (rempty, r) = hasSyncGates b2
     empty = map fst $ lempty ++ rempty
     partitions = disjointPartitions $ nub $ map snd $ l ++ r
+    emitInterleavings [] = error "LOTOS.Simplify internal error: emitInterleavings called with empty list"
     emitInterleavings (x:xs) = foldM (\ b1' b2' -> interleavingB b1' b2') x xs
     filterInPartition p = filter ((`elem` p) . snd)
     emitParallel l r = case (l, r) of
