@@ -7,12 +7,27 @@ import LOTOS.Simplify
 
 import Unbound.LocallyNameless
 
-sample :: Behavior
-sample = simplify $ uncontrolled [s2n "os.req", s2n "dev.irq"] $ simplify $ Hide $ bind class_gates $ Parallel class_gates os_spec dev_spec
+codegen :: [Gate] -> [Gate] -> Behavior -> Behavior -> Behavior
+codegen u c b1 b2 = simplify $ uncontrolled u $ simplify $ Hide $ bind c $ Parallel c b1 b2
 
-class_gates :: [Gate]
-class_gates = [s2n "class.send", s2n "class.ok", s2n "class.err"]
+simpleParse :: String -> Behavior
+simpleParse s = case parseBehavior "" s of
+    Left err -> error $ show err
+    Right b -> b
 
-os_spec, dev_spec :: Behavior
-Right os_spec = parseBehavior "" "os.req ?msg; class.send !msg; (class.ok; os.complete; exit [] class.err ?err; os.failed !err; exit)"
-Right dev_spec = parseBehavior "" "dev.enqueue ?packet; class.send !packet; dev.irq ?status; (class.ok; exit [] class.err !status; exit)"
+uncontrolled_gates, class_gates :: [Gate]
+uncontrolled_gates = map s2n ["os.req", "dev.sent", "dev.receive"]
+class_gates = map s2n ["class.send", "class.sent", "class.notsent", "class.receive"]
+
+os_send_spec, dev_send_spec, os_recv_spec, dev_recv_spec, os_spec, dev_spec :: Behavior
+os_send_spec = simpleParse "os.req ?msg; class.send !msg; (class.sent; os.complete; exit [] class.notsent ?err; os.failed !err; exit)"
+dev_send_spec = simpleParse "dev.enqueue ?packet; class.send !packet; dev.sent ?status; (class.sent; exit [] class.notsent !status; exit)"
+os_recv_spec = simpleParse "class.receive ?packet; os.arrive !packet; exit"
+dev_recv_spec = simpleParse "dev.receive ?packet; class.receive !packet; exit"
+os_spec = Interleaving os_send_spec os_recv_spec
+dev_spec = Interleaving dev_send_spec dev_recv_spec
+
+send_sample, recv_sample, full_sample :: Behavior
+send_sample = codegen uncontrolled_gates class_gates os_send_spec dev_send_spec
+recv_sample = codegen uncontrolled_gates class_gates os_recv_spec dev_recv_spec
+full_sample = codegen uncontrolled_gates class_gates os_spec dev_spec
