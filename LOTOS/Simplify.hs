@@ -200,7 +200,7 @@ impossibleGates gates (Action g _) | g `elem` gates = return Stop
 impossibleGates gates (Hide binding) = do
     (gates', b) <- unbind binding
     hideB gates' =<< impossibleGates (gates \\ gates') b
-impossibleGates gates p@(Instantiate _ gates') | not (null (gates `intersect` gates')) = return $ Parallel (gates `intersect` gates') p Stop
+impossibleGates gates p@(Instantiate _ gates' _) | not (null (gates `intersect` gates')) = return $ Parallel (gates `intersect` gates') p Stop
 impossibleGates gates b = simplifyOnce =<< descendBehavior (impossibleGates gates) b
 
 interleavingBranches :: Behavior -> [Behavior]

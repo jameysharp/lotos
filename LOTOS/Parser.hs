@@ -82,7 +82,7 @@ behavior =
             b <- term
             return $ Action gate $ bind vs b
         -- need a `try` here to disambiguate between a bracketed gate-list and a following Choice/Preempt operator
-        <|> Instantiate <$> processName <*> option [] (try $ brackets $ commaSep1 gateName)
+        <|> Instantiate <$> processName <*> option [] (try $ brackets $ commaSep1 gateName) <*> option [] (parens $ commaSep1 expression)
 
     exitExpression = ExitAny <$ reserved "any" <|> ExitExpression <$> expression
 
