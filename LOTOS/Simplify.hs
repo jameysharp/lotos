@@ -24,11 +24,11 @@ import Unbound.LocallyNameless hiding (union)
 simplify :: Behavior -> Behavior
 simplify = runFreshM . simplify'
 
-simplify' :: Behavior -> FreshM Behavior
+simplify' :: (Fresh m, Applicative m) => Behavior -> m Behavior
 simplify' b = simplifyOnce =<< descendBehavior simplify' b
 
 -- Note: If any rule introduces a constructor that appears in some rule's pattern, be sure to apply `simplifyOnce` recursively.
-simplifyOnce :: Behavior -> FreshM Behavior
+simplifyOnce :: (Fresh m, Applicative m) => Behavior -> m Behavior
 simplifyOnce (Choice b1 b2) = choiceB b1 b2
 simplifyOnce (Sequence b1 binding) = uncurry (sequenceB b1) =<< unbind binding
 simplifyOnce (Parallel sync b1 b2) = parallelB sync b1 b2
@@ -38,12 +38,12 @@ simplifyOnce (Hide binding) = uncurry hideB =<< unbind binding
 simplifyOnce (Preempt b1 b2) = preemptB b1 b2
 simplifyOnce b = return b
 
-choiceB :: Behavior -> Behavior -> FreshM Behavior
+choiceB :: Monad m => Behavior -> Behavior -> m Behavior
 choiceB Stop b = return b
 choiceB a Stop = return a
 choiceB a b = return $ Choice a b
 
-sequenceB :: Behavior -> [Variable] -> Behavior -> FreshM Behavior
+sequenceB :: (Fresh m, Applicative m) => Behavior -> [Variable] -> Behavior -> m Behavior
 sequenceB (Action g binding) names b2 = do
     (vs, b1) <- unbind binding
     Action g <$> (bind vs <$> sequenceB b1 names b2)
@@ -64,7 +64,7 @@ sequenceB b1 names (Exit vs) = replaceExit b1
     replaceExit b = descendBehavior replaceExit b
 sequenceB b1 names b2 = return $ Sequence b1 $ bind names b2
 
-parallelB :: [Gate] -> Behavior -> Behavior -> FreshM Behavior
+parallelB :: (Fresh m, Applicative m) => [Gate] -> Behavior -> Behavior -> m Behavior
 -- Distribute Parallel across Interleaving when possible.
 parallelB sync b1 b2 = do
     parallels <- sequence [ (emitParallel `on` filterInPartition p) l r | p <- partitions ]
@@ -113,18 +113,18 @@ parallelB sync b1 b2 = do
         rsync = Set.toList $ Set.unions $ map snd r
         simplify_r = simpleGates (rsync \\ lsync) $ map fst r
 
-breakGates :: [Gate] -> Behavior -> MaybeT FreshM (Behavior, [Variable], Map.Map Gate (Bind [GateValue] Behavior))
+breakGates :: (Fresh m, MonadPlus m, Applicative m) => [Gate] -> Behavior -> m (Behavior, [Variable], Map.Map Gate (Bind [GateValue] Behavior))
 breakGates gs (Action g binding) | g `notElem` gs = do
     (vs, b) <- unbind binding
     (next, names, rest) <- breakGates gs b
     let names' = Set.toList $ binders vs `Set.intersection` fv (Map.elems rest)
-    next' <- lift $ insertBeforeExit (\ vs' -> Exit $ map (ExitExpression . Variable) names' ++ vs') names next
+    next' <- insertBeforeExit (\ vs' -> Exit $ map (ExitExpression . Variable) names' ++ vs') names next
     return (Action g $ bind vs next', names' ++ names, rest)
 breakGates gs b = do
     choices <- breakGates' gs b
     return (Exit [], [], choices)
 
-breakGates' :: [Gate] -> Behavior -> MaybeT FreshM (Map.Map Gate (Bind [GateValue] Behavior))
+breakGates' :: MonadPlus m => [Gate] -> Behavior -> m (Map.Map Gate (Bind [GateValue] Behavior))
 breakGates' gs (Action g binding) | g `elem` gs = return $ Map.singleton g binding
 breakGates' gs (Choice b1 b2) = do
     choices1 <- breakGates' gs b1
@@ -134,7 +134,7 @@ breakGates' gs (Choice b1 b2) = do
     return $ Map.union choices1 choices2
 breakGates' _ _ = mzero
 
-unifyAction :: [Gate] -> Gate -> Bind [GateValue] Behavior -> Bind [GateValue] Behavior -> FreshM (Behavior, [(Variable, Variable)])
+unifyAction :: (Fresh m, Applicative m) => [Gate] -> Gate -> Bind [GateValue] Behavior -> Bind [GateValue] Behavior -> m (Behavior, [(Variable, Variable)])
 unifyAction sync g bindingl bindingr = do
     (vsl, bl) <- unbind bindingl
     (vsr, br) <- unbind bindingr
@@ -151,11 +151,11 @@ unifyGateValue v@(ValueDeclaration (Embed (Variable name))) (VariableDeclaration
 unifyGateValue (VariableDeclaration _) v@(ValueDeclaration (Embed (Variable name))) = return (name, v)
 unifyGateValue v@(VariableDeclaration name) (VariableDeclaration _) = return (name, v)
 
-synchronizationB :: Behavior -> Behavior -> FreshM Behavior
+synchronizationB :: Monad m => Behavior -> Behavior -> m Behavior
 synchronizationB (Exit v1) (Exit v2) | Just merged <- unifyExits v1 v2 = return $ Exit merged
 synchronizationB b1 b2 = return $ Synchronization b1 b2
 
-interleavingB :: Behavior -> Behavior -> FreshM Behavior
+interleavingB :: (Fresh m, Applicative m) => Behavior -> Behavior -> m Behavior
 interleavingB Stop b = insertBeforeExit (const Stop) [] b
 interleavingB a Stop = insertBeforeExit (const Stop) [] a
 -- XXX: Not clearly correct if subtree contains process instantiation.
@@ -163,7 +163,7 @@ interleavingB (Exit vs) b | Just merged <- everywhereM (mkM $ unifyExits vs) b =
 interleavingB a (Exit vs) | Just merged <- everywhereM (mkM $ unifyExits vs) a = return merged
 interleavingB b1 b2 = return $ Interleaving b1 b2
 
-hideB :: [Gate] -> Behavior -> FreshM Behavior
+hideB :: (Fresh m, Applicative m) => [Gate] -> Behavior -> m Behavior
 hideB [] b = return b
 hideB gs b@(Action g binding) | g `elem` gs = do
     (vs, b') <- unbind binding
@@ -185,16 +185,16 @@ hideB gs (Hide binding) = do
 hideB gs b@(Instantiate{}) = hideB' gs b
 hideB gs b = simplifyOnce =<< descendBehavior (hideB gs) b
 
-hideB' :: [Gate] -> Behavior -> FreshM Behavior
+hideB' :: Monad m => [Gate] -> Behavior -> m Behavior
 hideB' gs b = return $ case Set.toList $ Set.fromList gs `gatesFreeIn` b of
     [] -> b
     gs' -> Hide $ bind gs' b
 
-preemptB :: Behavior -> Behavior -> FreshM Behavior
+preemptB :: Monad m => Behavior -> Behavior -> m Behavior
 preemptB Stop b = return b
 preemptB b1 b2 = return $ Preempt b1 b2
 
-impossibleGates :: [Gate] -> Behavior -> FreshM Behavior
+impossibleGates :: (Fresh m, Applicative m) => [Gate] -> Behavior -> m Behavior
 impossibleGates [] b = return b
 impossibleGates gates (Action g _) | g `elem` gates = return Stop
 impossibleGates gates (Hide binding) = do
@@ -215,7 +215,7 @@ disjointPartitions (x : xs) = let (disj, conj) = go x xs in (x : conj) : disjoin
         (disj@(_:_), conj@(_:_)) -> second (conj ++) $ go (Set.unions conj) disj
         ret -> ret
 
-insertBeforeExit :: ([ExitExpression] -> Behavior) -> [Variable] -> Behavior -> FreshM Behavior
+insertBeforeExit :: (Fresh m, Applicative m) => ([ExitExpression] -> Behavior) -> [Variable] -> Behavior -> m Behavior
 insertBeforeExit f _ (Exit vs) = return $ f vs
 insertBeforeExit f results b@(Instantiate{}) = return $ Sequence b $ bind results $ f $ map (ExitExpression . Variable) results
 insertBeforeExit f results (Sequence lhs binding) = do
