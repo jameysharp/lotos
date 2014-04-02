@@ -7,6 +7,7 @@ module LOTOS.Synthesize where
 
 import LOTOS.AST
 import LOTOS.Controllable
+import LOTOS.Specialize
 
 import Control.Applicative
 import Control.Monad.Trans.Class
@@ -53,39 +54,48 @@ $(derive [''Statement, ''Procedure])
 instance Alpha Statement
 instance Alpha Procedure
 
-newtype Program = Program (Statement, [Procedure])
+newtype Program = Program [Procedure]
 
 instance Show Program where
-    show (Program (initial, procs)) = unlines $ map show procs ++ [show initial]
+    show (Program procs) = unlines $ map show procs
 
-codegen :: [Gate] -> Behavior -> Program
-codegen blocking b = Program $ runWriter $ runFreshMT $ codegen' (const Return) blocking $ uncontrolled blocking b
+codegen :: [Gate] -> Process -> Program
+codegen blocking = Program . execWriter . runFreshMT . codegenProcess blocking . specializeGates
 
-codegen' :: ([Expression] -> Statement) -> [Gate] -> Behavior -> FreshMT (Writer [Procedure]) Statement
-codegen' _ _ Stop = return Return
-codegen' onExit blocking (Action g binding) = do
+codegenProcess :: [Gate] -> Process -> FreshMT (Writer [Procedure]) ()
+codegenProcess blocking (Process procname (Embed binding)) = do
+    ((_, params), binding') <- unbind binding
+    (recProcs, b) <- unbind binding'
+    mapM_ (codegenProcess blocking) $ unrec recProcs
+    stmt <- codegenBehavior (name2String procname) (const Return) blocking $ uncontrolled blocking b
+    lift $ tell [Procedure (translate procname) $ bind params stmt]
+
+codegenBehavior :: String -> ([Expression] -> Statement) -> [Gate] -> Behavior -> FreshMT (Writer [Procedure]) Statement
+codegenBehavior _ _ _ Stop = return Return
+codegenBehavior base onExit blocking (Action g binding) = do
     (vs, b) <- unbind binding
-    next <- codegen' onExit blocking b
+    next <- codegenBehavior base onExit blocking b
     if g `elem` blocking
         then do
             let vars = fv b
-            procname <- fresh $ s2n "ready"
+            procname <- fresh $ s2n $ base ++ "_cont"
             lift $ tell [Procedure procname $ bind vars next]
             return $ Wait g $ bind vs (map Variable vars, procname)
         else return $ Call g $ bind vs next
-codegen' onExit blocking (Choice b1 b2) = IfThenElse <$> codegen' onExit blocking b1 <*> codegen' onExit blocking b2
-codegen' onExit blocking (Interleaving b1 b2) = do
-    procname <- fresh $ s2n "rendezvous"
+codegenBehavior base onExit blocking (Choice b1 b2) = IfThenElse <$> codegenBehavior base onExit blocking b1 <*> codegenBehavior base onExit blocking b2
+codegenBehavior base onExit blocking (Interleaving b1 b2) = do
+    procname <- fresh $ s2n $ base ++ "_join"
     lift $ tell [Procedure procname $ bind [] $ onExit []] -- FIXME: wait for procname to be called twice and merge the exits
     let onExit' exprs = Continue exprs procname
-    Unordered <$> codegen' onExit' blocking b1 <*> codegen' onExit' blocking b2
--- FIXME: handle codegen for Instantiate behaviors
-codegen' onExit _ (Exit vs) | all (/= ExitAny) vs = return $ onExit [ expr | ExitExpression expr <- vs ]
-codegen' onExit blocking (Sequence b1 binding) = do
+    Unordered <$> codegenBehavior base onExit' blocking b1 <*> codegenBehavior base onExit' blocking b2
+-- FIXME: implement onExit in Instantiate
+codegenBehavior _ _ _ (Instantiate procname [] params) = return $ Call (translate procname) $ bind (map (ValueDeclaration . Embed) params) Return
+codegenBehavior _ onExit _ (Exit vs) | all (/= ExitAny) vs = return $ onExit [ expr | ExitExpression expr <- vs ]
+codegenBehavior base onExit blocking (Sequence b1 binding) = do
     (names, b2) <- unbind binding
-    s2 <- codegen' onExit blocking b2
-    procname <- fresh $ s2n "sequence"
+    s2 <- codegenBehavior base onExit blocking b2
+    procname <- fresh $ s2n $ base ++ "_seq"
     lift $ tell [Procedure procname $ bind names s2]
-    codegen' (\ exprs -> Continue exprs procname) blocking b1
+    codegenBehavior base (\ exprs -> Continue exprs procname) blocking b1
 -- FIXME: handle codegen for Preempt behaviors
-codegen' _ _ b = error $ "LOTOS.Synthesize.codegen: can't synthesize " ++ show b ++ ", did you call simplify first?"
+codegenBehavior _ _ _ b = error $ "LOTOS.Synthesize.codegen: can't synthesize " ++ show b ++ ", did you call simplify first?"
