@@ -25,7 +25,7 @@ os_spec = Interleaving os_send_spec os_recv_spec
 dev_spec = Interleaving dev_send_spec dev_recv_spec
 
 make_sample :: String -> [Gate] -> Behavior -> Behavior -> Process
-make_sample name classes b1 b2 = Process (s2n name) $ Embed $ bind ([], []) $ bind (rec []) $ simplify $ Hide $ bind classes $ Parallel classes b1 b2
+make_sample name classes b1 b2 = simplifyProcess $ Process (s2n name) $ Embed $ bind ([], []) $ bind (rec []) $ Hide $ bind classes $ Parallel classes b1 b2
 
 send_sample, recv_sample, full_sample :: Process
 send_sample = make_sample "send" class_gates os_send_spec dev_send_spec
@@ -33,7 +33,7 @@ recv_sample = make_sample "recv" class_gates os_recv_spec dev_recv_spec
 full_sample = make_sample "full" class_gates os_spec dev_spec
 
 join_sample :: Process
-join_sample = Process (s2n "join") $ Embed $ bind ([], []) $ bind (rec [send_sample, recv_sample]) $ Interleaving (Instantiate (s2n "send") [] []) (Instantiate (s2n "recv") [] [])
+join_sample = simplifyProcess $ Process (s2n "join") $ Embed $ bind ([], []) $ bind (rec [send_sample, recv_sample]) $ Interleaving (Instantiate (s2n "send") [] []) (Instantiate (s2n "recv") [] [])
 
 cg_send, cg_recv, cg_full, cg_join :: Program
 cg_send = codegen uncontrolled_gates send_sample

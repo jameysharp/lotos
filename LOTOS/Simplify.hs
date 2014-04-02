@@ -1,5 +1,6 @@
 {-# LANGUAGE PatternGuards #-}
 module LOTOS.Simplify (
+    simplifyProcess,
     simplify,
     simplifyOnce,
     choiceB, sequenceB, parallelB, synchronizationB, interleavingB, hideB, preemptB
@@ -20,6 +21,17 @@ import Data.Maybe
 import qualified Data.Set as Set
 import Generics.RepLib
 import Unbound.LocallyNameless hiding (union)
+
+simplifyProcess :: Process -> Process
+simplifyProcess = runFreshM . simplifyProcess'
+
+simplifyProcess' :: (Fresh m, Applicative m) => Process -> m Process
+simplifyProcess' (Process procname (Embed binding)) = do
+    (formals, binding') <- unbind binding
+    (recProcs, b) <- unbind binding'
+    procs <- mapM simplifyProcess' $ unrec recProcs
+    b' <- simplify' b
+    return $ Process procname $ Embed $ bind formals $ bind (rec procs) b'
 
 simplify :: Behavior -> Behavior
 simplify = runFreshM . simplify'
