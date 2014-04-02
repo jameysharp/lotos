@@ -23,29 +23,25 @@ liftProcesses :: Process -> Process
 liftProcesses = runFreshM . liftProcesses'
 
 liftProcesses' :: Process -> FreshM Process
-liftProcesses' (Process procname (Embed binding)) = do
-    (formals, binding') <- unbind binding
-    (recProcs, b) <- unbind binding'
+liftProcesses' = transformProcess $ \ formals procs b -> do
     -- First, lift grandchildren.
-    procs <- mapM liftProcesses' $ unrec recProcs
+    procs' <- mapM liftProcesses' procs
     -- Then, lift children.
-    (updated, procs') <- runWriterT $ mfix $ \ updated -> liftM Set.fromList $ mapM (liftChildren formals updated) procs
+    (updated, procs'') <- runWriterT $ mfix $ \ updated -> liftM Set.fromList $ mapM (liftChildren formals updated) procs'
     -- Finally, update self.
-    return $ Process procname $ Embed $ bind formals $ bind (rec procs') $ extendInstantiate formals updated b
+    return (formals, procs'', extendInstantiate formals updated b)
 
 liftChildren :: ([Gate], [Variable]) -> Set.Set (Name Process) -> Process -> WriterT [Process] FreshM (Name Process)
-liftChildren newFormals@(newGates, newParams) updated (Process procname (Embed binding)) = do
-    ((gates, params), binding') <- unbind binding
-    (recProcs, b) <- unbind binding'
-    procs <- mapM (extendProcess newFormals updated) $ unrec recProcs
-    let self = Process procname $ Embed $ bind (newGates ++ gates, newParams ++ params) $ bind (rec []) $ extendInstantiate newFormals updated b
-    writer (procname, self : procs)
+liftChildren newFormals@(newGates, newParams) updated p@(Process procname _) = do
+    self <- flip transformProcess p $ \ (gates, params) procs b -> do
+        procs' <- mapM (extendProcess newFormals updated) procs
+        tell procs'
+        return ((newGates ++ gates, newParams ++ params), [], extendInstantiate newFormals updated b)
+    writer (procname, [self])
 
 extendProcess :: Fresh m => ([Gate], [Variable]) -> Set.Set (Name Process) -> Process -> m Process
-extendProcess newFormals@(newGates, newParams) updated (Process procname (Embed binding)) = do
-    ((gates, params), binding') <- unbind binding
-    (recProcs, b) <- unbind binding'
-    return $ Process procname $ Embed $ bind (newGates ++ gates, newParams ++ params) $ bind recProcs $ extendInstantiate newFormals updated b
+extendProcess newFormals@(newGates, newParams) updated = transformProcess $ \ (gates, params) procs b ->
+    return ((newGates ++ gates, newParams ++ params), procs, extendInstantiate newFormals updated b)
 
 extendInstantiate :: ([Gate], [Variable]) -> Set.Set (Name Process) -> Behavior -> Behavior
 extendInstantiate (newGates, newParams) updated = everywhere (mkT f)
@@ -59,13 +55,12 @@ extendInstantiate (newGates, newParams) updated = everywhere (mkT f)
 -- then this transformation will make the program bigger. If you're
 -- willing to deal with first-order gates, use liftProcesses instead.
 specializeGates :: Process -> Process
-specializeGates p = runFreshM $ do
-    Process procname (Embed binding) <- liftProcesses' p
-    (formals, binding') <- unbind binding
-    (recProcs, b) <- unbind binding'
-    let scope = Map.fromList [ (name, p) | p@(Process name _) <- unrec recProcs ]
-    (b', procs') <- flip runReaderT scope $ flip runStateT Map.empty $ specializeInstantiationGates b
-    return $ Process procname $ Embed $ bind formals $ bind (rec $ Map.elems procs') b'
+specializeGates p = runFreshM $ liftProcesses' p >>= transformProcess f
+    where
+    f formals procs b = do
+        let scope = Map.fromList [ (name, p) | p@(Process name _) <- procs ]
+        (b', procs') <- flip runReaderT scope $ flip runStateT Map.empty $ specializeInstantiationGates b
+        return (formals, Map.elems procs', b')
 
 type SpecializeM a = StateT (Map.Map (Name Process, [Gate]) Process) (ReaderT (Map.Map (Name Process) Process) FreshM) a
 
@@ -86,11 +81,12 @@ memoM f k = do
 specializeGatesWith :: (Name Process, [Gate]) -> SpecializeM Process
 specializeGatesWith (procname, gates) = do
     scope <- lift ask
-    let Just process@(Process _ (Embed binding)) = Map.lookup procname scope
+    let Just process = Map.lookup procname scope
     if null gates then return process else do
-    ((formalGates, formalParams), binding') <- unbind binding
-    (_, b) <- unbind binding' -- liftProcesses ensured we have no nested processes
+    -- NOTE: liftProcesses ensured we have no nested processes
+    Process _ body <- flip transformProcess process $ \ (formalGates, formalParams) [] b -> do
+        let Just assign = mkPerm (map AnyName formalGates) (map AnyName gates)
+        b' <- specializeInstantiationGates $ swaps assign b
+        return (([], formalParams), [], b')
     procname' <- fresh $ procname
-    let Just assign = mkPerm (map AnyName formalGates) (map AnyName gates)
-    b' <- specializeInstantiationGates $ swaps assign b
-    return $ Process procname' $ Embed $ bind ([], formalParams) $ bind (rec []) b'
+    return $ Process procname' body

@@ -26,12 +26,7 @@ simplifyProcess :: Process -> Process
 simplifyProcess = runFreshM . simplifyProcess'
 
 simplifyProcess' :: (Fresh m, Applicative m) => Process -> m Process
-simplifyProcess' (Process procname (Embed binding)) = do
-    (formals, binding') <- unbind binding
-    (recProcs, b) <- unbind binding'
-    procs <- mapM simplifyProcess' $ unrec recProcs
-    b' <- simplify' b
-    return $ Process procname $ Embed $ bind formals $ bind (rec procs) b'
+simplifyProcess' = transformProcess $ \ formals procs b -> (,,) formals <$> mapM simplifyProcess' procs <*> simplify' b
 
 simplify :: Behavior -> Behavior
 simplify = runFreshM . simplify'

@@ -116,3 +116,10 @@ descendBehavior f (Hide binding) = do
     (gs, b) <- unbind binding
     Hide <$> (bind gs <$> f b)
 descendBehavior f b = gmapM (mkM f) b
+
+transformProcess :: Fresh m => (([Gate], [Variable]) -> [Process] -> Behavior -> m (([Gate], [Variable]), [Process], Behavior)) -> Process -> m Process
+transformProcess f (Process procname (Embed binding)) = do
+    (formals, binding') <- unbind binding
+    (recProcs, b) <- unbind binding'
+    (formals', procs', b') <- f formals (unrec recProcs) b
+    return $ Process procname $ Embed $ bind formals' $ bind (rec procs') b'
