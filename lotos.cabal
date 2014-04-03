@@ -13,8 +13,7 @@ build-type:          Simple
 cabal-version:       >=1.8
 
 library
-  exposed-modules:     LOTOS,
-                       LOTOS.AST,
+  exposed-modules:     LOTOS.AST,
                        LOTOS.Controllable,
                        LOTOS.Parser,
                        LOTOS.Simplify,
@@ -24,6 +23,16 @@ library
                        LOTOS.Trace,
                        LOTOS.Util
   -- other-modules:       
+  ghc-options:         -Wall -fno-warn-name-shadowing
+  build-depends:       base ==4.6.*,
+                       containers ==0.5.*,
+                       parsec ==3.1.*,
+                       RepLib ==0.5.*,
+                       transformers ==0.3.*,
+                       unbound ==0.4.*
+
+executable lotos-eater
+  main-is:             lotos-eater.hs
   ghc-options:         -Wall -fno-warn-name-shadowing
   build-depends:       base ==4.6.*,
                        containers ==0.5.*,

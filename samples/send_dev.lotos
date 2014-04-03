@@ -1,0 +1,12 @@
+process dev_send[class.send, class.sent, class.notsent] :=
+    dev.enqueue ?packet;
+    class.send !packet;
+    dev.sent ?status;
+    (
+        class.sent;
+        exit
+    []
+        class.notsent !status;
+        exit
+    )
+endproc

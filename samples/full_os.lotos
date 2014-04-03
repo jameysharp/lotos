@@ -1,0 +1,25 @@
+process os_full[class.receive, class.send, class.sent, class.notsent] :=
+    os_send ||| os_recv
+where
+
+    process os_send :=
+        os.req ?msg;
+        class.send !msg;
+        (
+            class.sent;
+            os.complete;
+            exit
+        []
+            class.notsent ?err;
+            os.failed !err;
+            exit
+        )
+    endproc
+
+    process os_recv :=
+        class.receive ?packet;
+        os.arrive !packet;
+        exit
+    endproc
+
+endproc

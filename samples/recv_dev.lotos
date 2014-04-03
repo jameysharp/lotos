@@ -1,0 +1,5 @@
+process dev_recv[class.receive] :=
+    dev.receive ?packet;
+    class.receive !packet;
+    exit
+endproc

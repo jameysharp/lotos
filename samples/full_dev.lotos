@@ -1,0 +1,24 @@
+process dev_full[class.send, class.sent, class.notsent, class.receive] :=
+    dev_send ||| dev_recv
+where
+
+    process dev_send :=
+        dev.enqueue ?packet;
+        class.send !packet;
+        dev.sent ?status;
+        (
+            class.sent;
+            exit
+        []
+            class.notsent !status;
+            exit
+        )
+    endproc
+
+    process dev_recv :=
+        dev.receive ?packet;
+        class.receive !packet;
+        exit
+    endproc
+
+endproc
