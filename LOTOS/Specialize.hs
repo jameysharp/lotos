@@ -1,16 +1,15 @@
+{-# LANGUAGE PatternGuards #-}
 module LOTOS.Specialize (liftProcesses, specializeGates) where
 
 import LOTOS.AST
 
-import Control.Monad
 import Control.Monad.Fix
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.Reader
 import Control.Monad.Trans.State
 import Control.Monad.Trans.Writer
 import qualified Data.Map as Map
-import qualified Data.Set as Set
-import Generics.RepLib
+import Data.Monoid
 import Unbound.LocallyNameless
 
 -- "Lambda-lifting" for processes. This is conceptually related to the
@@ -20,34 +19,28 @@ import Unbound.LocallyNameless
 -- support nested functions. If you don't want to deal with first-order
 -- gates either, use specializeGates instead.
 liftProcesses :: Process -> Process
-liftProcesses = runFreshM . liftProcesses'
+liftProcesses = runFreshM . liftProcessesM
 
-liftProcesses' :: Process -> FreshM Process
-liftProcesses' = transformProcess $ \ formals procs b -> do
-    -- First, lift grandchildren.
-    procs' <- mapM liftProcesses' procs
-    -- Then, lift children.
-    (updated, procs'') <- runWriterT $ mfix $ \ updated -> liftM Set.fromList $ mapM (liftChildren formals updated) procs'
-    -- Finally, update self.
-    return (formals, procs'', extendInstantiate formals updated b)
+liftProcessesM :: Process -> FreshM Process
+liftProcessesM p = do
+    (p', descendents) <- runWriterT $ liftProcesses' Map.empty p
+    flip transformProcess p' $ \ formals [] b -> return (formals, descendents, b)
 
-liftChildren :: ([Gate], [Variable]) -> Set.Set (Name Process) -> Process -> WriterT [Process] FreshM (Name Process)
-liftChildren newFormals@(newGates, newParams) updated p@(Process procname _) = do
-    self <- flip transformProcess p $ \ (gates, params) procs b -> do
-        procs' <- mapM (extendProcess newFormals updated) procs
-        tell procs'
-        return ((newGates ++ gates, newParams ++ params), [], extendInstantiate newFormals updated b)
-    writer (procname, [self])
+type Scope = ([Gate], [Variable])
 
-extendProcess :: Fresh m => ([Gate], [Variable]) -> Set.Set (Name Process) -> Process -> m Process
-extendProcess newFormals@(newGates, newParams) updated = transformProcess $ \ (gates, params) procs b ->
-    return ((newGates ++ gates, newParams ++ params), procs, extendInstantiate newFormals updated b)
+liftProcesses' :: Map.Map (Name Process) Scope -> Process -> WriterT [Process] FreshM Process
+liftProcesses' updated p@(Process name _) = flip transformProcess p $ \ formals procs b -> do
+    let formals' = Map.findWithDefault mempty name updated `mappend` formals
+    let updated' = Map.fromList [ (name, formals') | Process name _ <- procs ] `Map.union` updated
+    procs' <- mapM (liftProcesses' updated') procs
+    b' <- lift $ extendInstantiate updated' b
+    writer ((formals', [], b'), procs')
 
-extendInstantiate :: ([Gate], [Variable]) -> Set.Set (Name Process) -> Behavior -> Behavior
-extendInstantiate (newGates, newParams) updated = everywhere (mkT f)
-    where
-    f (Instantiate procname gates params) | procname `Set.member` updated = Instantiate procname (newGates ++ gates) (map Variable newParams ++ params)
-    f b = b
+extendInstantiate :: Map.Map (Name Process) Scope -> Behavior -> FreshM Behavior
+extendInstantiate updated (Instantiate procname gates params)
+    | Just (newGates, newParams) <- Map.lookup procname updated
+    = return $ Instantiate procname (newGates ++ gates) (map Variable newParams ++ params)
+extendInstantiate updated b = descendBehavior (extendInstantiate updated) b
 
 -- In addition to "lambda-lifting" the process, specializeGates ensures
 -- that none of the nested processes are parameterized over gates. If a
@@ -55,7 +48,7 @@ extendInstantiate (newGates, newParams) updated = everywhere (mkT f)
 -- then this transformation will make the program bigger. If you're
 -- willing to deal with first-order gates, use liftProcesses instead.
 specializeGates :: Process -> Process
-specializeGates p = runFreshM $ liftProcesses' p >>= transformProcess f
+specializeGates p = runFreshM $ liftProcessesM p >>= transformProcess f
     where
     f formals procs b = do
         let scope = Map.fromList [ (name, p) | p@(Process name _) <- procs ]
