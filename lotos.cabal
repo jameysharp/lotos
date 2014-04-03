@@ -19,7 +19,8 @@ library
                        LOTOS.Parser,
                        LOTOS.Simplify,
                        LOTOS.Specialize,
-                       LOTOS.Trace
+                       LOTOS.Trace,
+                       LOTOS.Util
   -- other-modules:       
   ghc-options:         -Wall -fno-warn-name-shadowing
   build-depends:       base ==4.6.*,
