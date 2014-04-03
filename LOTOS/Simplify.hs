@@ -38,20 +38,25 @@ inlineProcesses :: (Fresh m, Applicative m, MonadFix m) => Process -> m Process
 inlineProcesses p = liftM fst $ mfix $ \ ~(_, (occurs, bodies)) ->
     flip runReaderT (bodies `Map.difference` Map.filter (> 1) (counts occurs)) $ runWriterT $ inlineProcesses' p
 
-type Inlines = Map.Map (Name Process) Behavior
+type Inlines = Map.Map (Name Process) ([Gate] -> [Expression] -> Behavior)
 type InlineCountT m a = WriterT (Counter (Name Process), Inlines) (ReaderT Inlines m) a
 
 inlineProcesses' :: (Fresh m, Applicative m) => Process -> InlineCountT m Process
-inlineProcesses' p@(Process procname _) = flip transformProcess p $ \ formals procs b -> do
+inlineProcesses' p@(Process procname _) = flip transformProcess p $ \ formals@(formalGates, formalParams) procs b -> do
     procs' <- mapM inlineProcesses' procs
     b' <- inlineInstantiations b
+    let doInline actualGates actualParams =
+            let Just assignGates = mkPerm (map AnyName formalGates) (map AnyName actualGates)
+            in swaps assignGates $ substs (zip formalParams actualParams) b'
+    tell (mempty, Map.singleton procname doInline)
     inlines <- lift ask
-    writer ((formals, [ p | p@(Process name _) <- procs', name `Map.notMember` inlines ], b'), (mempty, Map.singleton procname b'))
+    return (formals, [ p | p@(Process name _) <- procs', name `Map.notMember` inlines ], b')
 
 inlineInstantiations :: (Fresh m, Applicative m) => Behavior -> InlineCountT m Behavior
-inlineInstantiations b@(Instantiate procname _ _) = do
+inlineInstantiations b@(Instantiate procname actualGates actualParams) = do
+    tell (counter procname, mempty)
     inlines <- lift ask
-    writer (fromMaybe b $ Map.lookup procname inlines, (counter procname, mempty))
+    return $ maybe b (\ f -> f actualGates actualParams) $ Map.lookup procname inlines
 inlineInstantiations b = descendBehavior inlineInstantiations b
 
 simplify :: Behavior -> Behavior
