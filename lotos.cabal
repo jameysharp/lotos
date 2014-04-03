@@ -19,6 +19,8 @@ library
                        LOTOS.Parser,
                        LOTOS.Simplify,
                        LOTOS.Specialize,
+                       LOTOS.Synthesize,
+                       LOTOS.Synthesize.AST,
                        LOTOS.Trace,
                        LOTOS.Util
   -- other-modules:       
