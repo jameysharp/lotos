@@ -1,0 +1,430 @@
+lotos-eater
+===========
+
+This is a compiler for a language called [LOTOS][], which is a language
+in the "process calculus" tradition, which is related to the concurrency
+models that eventually appeared in languages like Erlang or Go.
+
+[LOTOS]: http://lotos.site.uottawa.ca/ftp/pub/Lotos/Intro/
+
+This compiler generates event-driven imperative (e.g. C or JavaScript)
+code from LOTOS specifications. As of this writing, I've been working on
+it for about two weeks, so it has plenty of rough edges, and only a
+subset of LOTOS is supported.
+
+The compiler is written entirely in Haskell, using packages from Hackage
+including unbound and Parsec. See `lotos.cabal` for the current list.
+
+This project was inspired by the [Termite][] language for synthesizing
+device drivers from high-level specifications; you can read the
+[high-level overview][Termite], the SOSP'09 paper, or the 2010 PhD
+thesis, depending on how deep you'd like to dive. More recently, folks
+at [Intel Labs joined the Termite project in 2011][Register], most
+recently publishing a report in the [December 2013 issue of Intel
+Technology Journal][IntelTech].
+
+[Termite]: http://www.ertos.nicta.com.au/research/drivers/synthesis/
+[Register]: http://www.theregister.co.uk/2011/06/10/automatic_device_driver_synthesis/
+[IntelTech]: http://www.cse.unsw.edu.au/~leonidr/publications/Vij_KRHZRWL_13.pdf
+
+Comparing LOTOS with Termite
+============================
+
+The Termite synthesis language is a variation of LOTOS. Compared to
+LOTOS, Termite:
+
+- only supports data types that look like C `struct`s with bitfields,
+- uses syntax resembling C function calls for gates,
+- requires annotating states that must be reached as input for Termite's
+  liveness analysis,
+- removes the local variable features in favor of global variables,
+- and describes variable updates by constraining the relationships
+  between variables.
+
+Making the syntax more C-like seems reasonable considering that the
+audience for this tool is intended to be device driver developers who
+can be expected to be familiar with C but not with LOTOS. To my eye
+though, it makes the syntax more verbose than necessary. I suspect the
+compiler can and should infer some of the information that both LOTOS
+and Termite require the user to explicitly specify, to make using the
+language more practical for people who just want a working device
+driver.
+
+More problematic, in my opinion, are the other differences.
+
+Expressing program state as constraints on global variables forces the
+use of SMT solvers in order to generate code at all. (I hope to use SMT
+solvers for advanced optimization in this project, but I don't currently
+think they should be necessary for making things work in the common
+case.) It also requires all globals to have a known initial state, even
+when they aren't meaningful at initialization, which makes the
+specification unnecessarily verbose.
+
+Further, relying exclusively on global variables prevents dynamic
+allocation. So if you want to support having up to five requests in
+flight at a time, you have to make five copies of all the source code
+and variables related to those requests. And if you want an unbounded
+number of requests in flight, that's just too bad. Since overlapped I/O
+is critical for high-performance device drivers, I find this design
+decision especially mysterious.
+
+LOTOS supports perfectly reasonable locally-scoped variables, and static
+analysis to determine the lifetime of those variables is a textbook
+piece of compiler technology.
+
+Finally, Termite's global state-space view means the compiler has to
+operate on a large finite-state-machine for each specification, then
+produce a much larger state machine that multiplies the OS and device
+specifications together, and finally search for a valid driver strategy
+in that giant product state machine.
+
+The Termite PhD thesis reports that of the two device drivers on which
+they tested this methodology, one took two minutes of computation to
+synthesize, while the other took four hours. No doubt there are many
+optimizations to be applied to the implementation, but it's probably
+always going to do an amount of work that's exponential in the size of
+the input. I say that both because it's search-based, which is typically
+exponential, and because I think the state machine representation is
+worst-case exponential in the size of the input.
+
+Approach in this work
+=====================
+
+My hypothesis (not yet proven!) is that the synthesis process is more
+efficiently, and more naturally, expressed as transformations directly
+on the LOTOS source that reduce it to a core subset, which then has a
+trivial event-driven translation to imperative languages like C or
+JavaScript.
+
+- By operating on the high-level LOTOS specification instead of dropping
+  down to a state machine representation, we retain high-level structure
+  that's useful for optimization. This may still require search, but
+  over a smaller space, and so far I've been able to do everything using
+  efficient and deterministic rewrite rules.
+
+- By allowing local variables, we can handle use cases that need dynamic
+  allocation. Also, programmers don't have to spend effort identifying
+  all their intermediate variables and lifting them to global scope.
+
+Constructing combined specifications
+------------------------------------
+
+It's worth noting that the way Termite combines a device spec with an OS
+spec is exactly analogous to LOTOS' parallel synchronization operator,
+`|[...]|`, when parameterized over what Termite calls the device-class
+or "internal" events. That operator runs two processes with arbitrary
+interleaving, except that if one process wants to pass through a gate
+that's in the synchronization set, it has to wait for the other process
+to become ready for that same gate as well, and at that point they may
+exchange data. So as a first step, we can take two (or more)
+specifications and combine them in a trivial LOTOS wrapper that invokes
+each specification in parallel.
+
+Translating to a LOTOS core
+---------------------------
+
+Most LOTOS operators have straightforward implementations either
+directly in C/JavaScript, or given a small library of primitives
+equivalent to those in [TAME][] or [tamejs][].
+
+However, the parallel synchronization operator `|[...]|` (and its
+special case, the full synchronization operator `||`) is troublesome. So
+the key idea in this project is to apply rewrite rules to replace
+parallel synchronization with other operators, anywhere that doing so
+preserves the semantics of the language. I also apply a variety of other
+simplifications, both to reduce the complexity of the final generated
+code, and because they may expose more opportunities to rewrite away
+parallel synchronization.
+
+Resolving ambiguity and blocking
+--------------------------------
+
+There is one additional piece of information that we need, though, not
+included in a LOTOS specification, which is the list of gates that
+require us to wait for something external. (In different places in the
+code I call them either "blocking" or, in reference to supervisory
+control theory for discrete event systems, "uncontrolled".) These gates
+are translated differently during code generation, as they need to
+capture a continuation and set up a callback.
+
+The blocking gates are also used to make the specifications easier to
+write. Imagine:
+
+- Your OS specification says that the OS will request that a specified
+  packet should be sent, after which a "packet send" class event should
+  occur for that packet.
+
+- Your device spec, being written from the hardware's point of view,
+  says that once its registers have been programmed to transmit a
+  specified packet, a "packet send" class event will occur for that
+  packet.
+
+We'll synchronize on the "packet send" class event, but these
+specifications don't indicate whether the OS request or the register
+programming should happen first.
+
+So when given a choice, we pick the uncontrolled gate (the OS request)
+because if we did the register programming first, we can't be sure the
+OS request will ever come. (Also, in this example, doing it the other
+way requires anti-causal data flow, which would make the translation,
+er, tricky.)
+
+At the moment, the list of uncontrolled gates is provided as an external
+parameter to the compiler. I suspect in the future, the compiler could
+parse C header files for the library routines which the generated code
+is expected to call, and identify as uncontrolled any routines which
+take a callback. Parsing the headers should also allow all types to be
+inferred, instead of requiring developers to specify them redundantly in
+LOTOS.
+
+Future directions
+=================
+
+If this project goes well, there are several directions worth exploring
+further.
+
+Specifying register access
+--------------------------
+
+One of the most tedious aspects of writing device drivers is dealing
+with hardware registers. Registers are often memory-mapped, but they
+don't behave like memory: individual bits have different semantics,
+which may include such traits as being read-only, being write-only, or
+triggering an action if you write one value but being a no-op if you
+write another.
+
+In addition, register reads and writes have to cross some bus to reach
+the hardware. Whether that bus is PCI, SPI, I2C, USB, etc., register
+access often contributes a measurable amount of latency, so it's
+important to optimize register accesses by combining writes and avoiding
+read-modify-write cycles whenever possible. Doing this by hand in C
+means that driver writers can't create any reasonable abstractions for
+register access and typically have to hand-code a pile of bitwise
+operators at every register access.
+
+One (unfortunately defunct) project that I think did a good job
+capturing these properties is [NDL (Network Device Language)][NDL]. It
+might make sense to use a language like NDL to specify register layouts,
+making the register operators available as LOTOS gates, and then apply
+NDL's optimizations when lowering from LOTOS core to C.
+
+[NDL]: http://www.cs.nyu.edu/~cconway/main/ndl/
+
+Generating specifications from existing drivers
+-----------------------------------------------
+
+In order to seriously evaluate driver synthesis, we need a large sample
+of drivers expressed as LOTOS specifications. Some people enjoy writing
+drivers, but anyone would be dismayed at the prospect of getting 1,000
+drivers correct in rapid succession.
+
+There are millions of lines of source code in the `drivers/` directory
+of the Linux kernel source tree, which together capture an amazing
+amount of knowledge about the features, bugs, and quirks of a diverse
+range of hardware. While these drivers have bugs, they usually reflect
+how the hardware really behaves more accurately than any data sheet. The
+same goes for the huge collection of (usually closed-source) Windows
+drivers in existence.
+
+Support for semi-automated or even fully automated extraction of
+specifications from existing drivers would be very helpful to practical
+deployment of a driver synthesis tool. To that end, tools like
+[RevNIC][] (now part of the [S2E][] project), that automatically
+reverse-engineer existing device drivers, may prove useful. In fact, in
+the RevNIC paper, the authors suggest that instead of generating C
+source as they do now, they could perhaps generate input for Termite.
+
+[RevNIC]: https://sites.google.com/site/dslabepfl/pubs/revnic
+[S2E]: https://sites.google.com/site/dslabepfl/proj/s2e
+
+Termite development has proceeded on a different path, where they rely
+on the hardware manufacturers to run a pre-processor that
+semi-automatically extracts a Termite device specification from the HDL
+model of the hardware. Typically, only the hardware vendor can do that,
+as they generally guard the HDL model as a trade secret. I think it's
+important to make it easy for hardware vendors to synthesize drivers,
+but I don't believe enough of them will do it for the driver synthesis
+approach to become viable. We need a bootstrap strategy, and I suspect
+that means emphasizing ways to construct device specifications without
+vendor help.
+
+The Termite approach requires writing a specification of the interface
+that the operating system uses for all drivers of a given device class,
+such as the interface for network cards. RevNIC is so-named because it
+has developer-provided knowledge of the Windows OS interface to network
+cards. I have a vague suspicion that using RevNIC could be made easier
+by making it consume the same OS interface spec that Termite (or this
+project) needs.
+
+Given that kind of collaboration, the bulk of the manual effort in
+extracting drivers might be in hand-writing the OS interface
+specifications for each OS that has drivers you want to reverse
+engineer, and for each OS that you want to generate drivers for.
+
+I suspect that reverse-engineered driver specifications will always need
+manual clean-up, but if tools can automate most of the process, that
+would be a huge win for making driver synthesis the primary way that
+drivers are developed.
+
+Specifications that are reverse-engineered from source code can retain
+more high-level information and so I suspect they will need less manual
+cleanup. That implies that it would be valuable to research extracting
+specifications from source code to complement RevNIC's binary analysis.
+
+Checking for specification bugs
+-------------------------------
+
+Specifications produced from existing driver source code, existing
+driver binaries, vendor-internal HDL models, and hand-written by
+inspection of the hardware data sheet, will all be different, sometimes
+subtly so.
+
+Model-checking techniques like bisimulation for checking functional
+equivalence between specifications derived from different sources can
+help give reassurance that the specifications are correct, or identify
+differences that are due to bugs.
+
+As far as I can tell, the primary thing anyone has ever done with LOTOS
+is model-checking, so there are existing tools for doing this. In
+particular, see the commercial [CADP][] toolbox.
+
+[CADP]: http://cadp.inria.fr/
+
+Even if driver synthesis never takes off, it would be a huge win for
+driver reliability to be able to validate independently-developed
+drivers, written for different operating systems, against each other.
+
+Optimizing embedded drivers
+---------------------------
+
+General purpose operating systems like Linux or Windows need support for
+near-infinite combinations of hardware, because the driver developers do
+not know what other hardware will co-exist with theirs.
+
+By contrast, embedded systems typically have a known set of hardware
+peripherals, and often a single-purpose application using that hardware,
+determined when the device is built. In that setting it would be useful
+to take advantage of the static nature of the system to remove driver
+features that aren't used in that system and to aggressively inline and
+specialize what's left.
+
+Driver models typically reflect the tree-structure of the hardware
+they're controlling. For example, when you plug in a USB flash disk,
+you're probably using:
+
+- a SCSI disk driver,
+- on a USB Mass Storage driver that provides a SCSI bus interface,
+- on a USB host controller driver (EHCI or xHCI) that provides a USB bus
+  interface,
+- on a PCI bus driver.
+
+Similarly, an embedded system might have an application collecting
+sensor measurements, that uses a driver for a specific sensor device,
+which in turn uses a SPI or I2C bus driver specific to the
+system-on-chip hardware the system uses.
+
+Termite demonstrated that it's possible to fuse a device model to an OS
+interface specification. If you treat each layer in the device tree as
+having it's own device/OS interface pair, then it sometimes makes sense
+to fuse multiple layers together, if you know the fused layers will only
+be used together. And you can use the same specifications in general
+purpose operating systems as well as embedded applications, simply
+combining them using a different top-level specification.
+
+Because this project attempts to compile full LOTOS specifications,
+without any inherent notion of "this is a device specification" or
+"that's an OS specification", I believe it can support users providing
+any number of specifications and requesting that they all be fused
+together.
+
+Generating other kinds of event-driven code
+-------------------------------------------
+
+It's become standard practice to write network or UI software in an
+event-driven style, where function calls never block, but instead take a
+reference to a callback function to call when the work is complete.
+
+This kind of code is often written in C, which is terrible for it, or
+Java, which is mediocre, or JavaScript, which is almost tolerable. The
+problem is that event-driven style requires capturing a continuation so
+that any local state prior to blocking is still available once
+computation resumes. Java and JavaScript support nested functions whose
+closures act as a poor-man's continuation, but each blocking call leads
+to the nesting level wandering further to the right. C requires the
+programmer to explicitly declare and allocate a structure for each
+distinct continuation.
+
+In these languages, there's a significant programmer productivity
+advantage to using threads instead of event callbacks, because any
+thread can block without interfering with the progress of other threads.
+However, there's a performance cost to using a large number of threads,
+and although there's been huge progress on optimizing thread creation
+since the '90s, high-performance systems have still found the costs
+prohibitive.
+
+(Some people also argue that single-threaded event-driven systems
+side-step issues such as race conditions and deadlock that plague thread
+programmers. In general, event architectures don't actually solve these
+issues, especially when they add a small number of threads or processes
+to take advantage of multi-core servers, so only the performance
+argument is convincing.)
+
+Many functional languages, such as Scheme and Haskell, have a call/cc
+function that allows code which appears to be straight-line sequential
+to capture a continuation mid-stream. Such language features make
+event-driven code as easy to write as threaded code. There have been
+successful projects to introduce such features to other languages using
+source-to-source preprocessors, like [TAME][] (see ["Events Can Make
+Sense"][TAME-Usenix] from USENIX 2007), which provides syntactic sugar
+for continuation management in C++, and [tamejs][], which does the same
+for JavaScript.
+
+[TAME]: https://github.com/okws/sfslite/wiki/tame
+[TAME-Usenix]: http://pdos.csail.mit.edu/~max/docs/tame.pdf
+[tamejs]: https://www.npmjs.org/package/tamejs
+
+The current project's ability to generate event-driven implementations
+from LOTOS specifications makes LOTOS an option for the same sort of
+high-performance applications that are currently using C/C++ or
+JavaScript, where we should be able to produce roughly the same code
+that a developer would have written by hand.
+
+Generating hardware emulators
+-----------------------------
+
+Virtual machine (VM) software like QEMU or VMWare has a problem that's
+the opposite of the OS device driver problem. They need virtual hardware
+devices that recognize the same patterns of register accesses that real
+hardware does, and performs some action on behalf of the VM guest that's
+analogous to what the real hardware would have done. For example, QEMU
+offers an emulated Intel i82559C Ethernet device, and if the guest OS
+sends a packet through that device, QEMU can send the same packet using
+the BSD sockets API in the host OS.
+
+We should be able to do the same thing with device specifications
+written in the Termite style. Instead of combining the device spec with
+an OS interface spec, combine it with a virtualization spec. QEMU would
+have one LOTOS specification describing how it virtualizes network
+devices in general, and you could pair it with any LOTOS network device
+model that you'd written for generating device drivers.
+
+Replacing hand-coded device models with device specifications that are
+shared with the corresponding device driver means that the
+specifications can be tested both against the real hardware (when used
+as device drivers) and against hand-written drivers for the hardware
+(when used in virtualization).
+
+Generating the virtualized device implementation would make it easier to
+virtualize new classes of hardware, as the only new code needed is that
+which emulates the behavior of the new class of devices. This separation
+of concerns means that people writing virtualization tools don't need to
+understand the hardware they're virtualizing, just the host OS APIs that
+abstract that hardware, which should enable more people to hack on
+emulators.
+
+It might occasionally be useful to users to be able to quickly add
+emulation for a new piece of hardware. Hardware designers already use
+RTL simulators to test their designs, and some of those simulators
+support running a virtualized OS against the RTL design, but that may be
+more heavy-weight than desired for driver testing and development
+against hardware that hasn't been physically prototyped yet.
