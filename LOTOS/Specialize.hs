@@ -2,6 +2,7 @@
 module LOTOS.Specialize (liftProcesses, specializeGates) where
 
 import LOTOS.AST
+import LOTOS.AST.Util
 
 import Control.Monad.Fix
 import Control.Monad.Trans.Class

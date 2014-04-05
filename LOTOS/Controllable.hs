@@ -2,6 +2,7 @@
 module LOTOS.Controllable (uncontrolled) where
 
 import LOTOS.AST
+import LOTOS.AST.Util
 import LOTOS.Simplify
 
 import Control.Monad

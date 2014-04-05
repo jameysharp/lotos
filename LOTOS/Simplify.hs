@@ -7,6 +7,7 @@ module LOTOS.Simplify (
 ) where
 
 import LOTOS.AST
+import LOTOS.AST.Util
 import LOTOS.Util
 
 import Control.Applicative
