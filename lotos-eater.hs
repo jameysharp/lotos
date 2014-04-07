@@ -4,9 +4,11 @@ import LOTOS.AST
 import LOTOS.Parser
 import LOTOS.Simplify
 import LOTOS.Synthesize
+import LOTOS.TypeCheck
 
 import Control.Monad
 import Data.List
+import qualified Data.Map as Map
 import System.Environment
 import Unbound.LocallyNameless hiding (union)
 import Unbound.LocallyNameless.Ops
@@ -41,10 +43,24 @@ main = do
     print merged
     putStrLn ""
 
+    let showProcessFunctionality (proc, func) = show proc ++ " : " ++ show func
+
+    putStrLn "Inferred process functionality:"
+    case inferFunctionality merged of
+        Left err -> fail err
+        Right fs -> mapM_ (putStrLn . showProcessFunctionality) $ Map.toList fs
+    putStrLn ""
+
     let simplified = simplifyProcess merged
 
     putStrLn "After simplification:"
     print simplified
+    putStrLn ""
+
+    putStrLn "Simplified process functionality:"
+    case inferFunctionality simplified of
+        Left err -> fail $ "simplification broke functionality inference: " ++ err
+        Right fs -> mapM_ (putStrLn . showProcessFunctionality) $ Map.toList fs
     putStrLn ""
 
     putStrLn "Imperative equivalent:"
