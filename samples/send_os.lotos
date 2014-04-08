@@ -4,10 +4,10 @@ process os_send[class.send, class.sent, class.notsent] :=
     (
         class.sent;
         os.complete;
-        exit
+        os_send[class.send, class.sent, class.notsent]
     []
         class.notsent ?err;
         os.failed !err;
-        exit
+        os_send[class.send, class.sent, class.notsent]
     )
 endproc

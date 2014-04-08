@@ -4,9 +4,9 @@ process dev_send[class.send, class.sent, class.notsent] :=
     dev.sent ?status;
     (
         class.sent;
-        exit
+        dev_send[class.send, class.sent, class.notsent]
     []
         class.notsent !status;
-        exit
+        dev_send[class.send, class.sent, class.notsent]
     )
 endproc

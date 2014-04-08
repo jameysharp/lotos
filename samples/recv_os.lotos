@@ -1,5 +1,5 @@
 process os_recv[class.receive] :=
     class.receive ?packet;
     os.arrive !packet;
-    exit
+    os_recv[class.receive]
 endproc
