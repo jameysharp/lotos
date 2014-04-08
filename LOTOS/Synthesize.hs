@@ -8,6 +8,7 @@ import LOTOS.Synthesize.AST
 import Control.Applicative
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.Writer
+import qualified Data.Set as Set
 import Unbound.LocallyNameless
 
 codegen :: [Gate] -> Process -> Program
@@ -28,7 +29,7 @@ codegenBehavior base onExit blocking (Action g binding) = do
     next <- codegenBehavior base onExit blocking b
     if g `elem` blocking
         then do
-            let vars = fv b
+            let vars = Set.toList $ fv b
             procname <- fresh $ s2n $ base ++ "_cont"
             lift $ tell [Procedure procname $ bind vars next]
             return $ Wait g $ bind vs (map Variable vars, procname)
