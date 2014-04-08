@@ -93,8 +93,8 @@ sequenceB (Exit vs) names b | not (any (ExitAny ==) vs) = return $ substs [(old,
 sequenceB b1 names (Exit vs) = replaceExit b1
     where
     replaceExit (Exit vs') =
-        let rebind (ExitExpression (Variable var)) | Just expr <- lookup var (zip names vs') = expr
-            -- XXX: Once Expression adds operators, check that we aren't using ExitAny as an operand
+        let rewrite (Variable var) = lookup var (zip names vs')
+            rebind (ExitExpression expr) | Just expr' <- rewrite expr = expr'
             rebind e = e
         in return $ Exit $ map rebind vs
     -- Don't replace Exits on the LHS of a nested Sequence.
