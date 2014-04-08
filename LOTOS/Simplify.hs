@@ -8,57 +8,26 @@ module LOTOS.Simplify (
 
 import LOTOS.AST
 import LOTOS.AST.Util
-import LOTOS.Util
 
 import Control.Applicative
 import Control.Arrow
 import Control.Monad
-import Control.Monad.Fix
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.Maybe
-import Control.Monad.Trans.Reader
 import Control.Monad.Trans.Writer
 import Data.Function
 import Data.List
 import qualified Data.Map as Map
 import Data.Maybe
-import Data.Monoid
 import qualified Data.Set as Set
 import Generics.RepLib
 import Unbound.LocallyNameless hiding (union)
 
 simplifyProcess :: Process -> Process
-simplifyProcess p = runFreshM $ inlineProcesses p >>= simplifyProcess'
+simplifyProcess = runFreshM . simplifyProcess'
 
 simplifyProcess' :: (Fresh m, Applicative m) => Process -> m Process
 simplifyProcess' = transformProcess $ \ formals procs b -> (,,) formals <$> mapM simplifyProcess' procs <*> simplify' b
-
--- Inline processes that are used only once, and delete processes that
--- are never used.
-inlineProcesses :: (Fresh m, Applicative m, MonadFix m) => Process -> m Process
-inlineProcesses p = liftM fst $ mfix $ \ ~(_, (occurs, bodies)) ->
-    flip runReaderT (bodies `Map.difference` Map.filter (> 1) (counts occurs)) $ runWriterT $ inlineProcesses' p
-
-type Inlines = Map.Map (Name Process) ([Gate] -> [Expression] -> Behavior)
-type InlineCountT m a = WriterT (Counter (Name Process), Inlines) (ReaderT Inlines m) a
-
-inlineProcesses' :: (Fresh m, Applicative m) => Process -> InlineCountT m Process
-inlineProcesses' p@(Process procname _) = flip transformProcess p $ \ formals@(formalGates, formalParams) procs b -> do
-    procs' <- mapM inlineProcesses' procs
-    b' <- inlineInstantiations b
-    let doInline actualGates actualParams =
-            let Just assignGates = mkPerm (map AnyName formalGates) (map AnyName actualGates)
-            in swaps assignGates $ substs (zip formalParams actualParams) b'
-    tell (mempty, Map.singleton procname doInline)
-    inlines <- lift ask
-    return (formals, [ p | p@(Process name _) <- procs', name `Map.notMember` inlines ], b')
-
-inlineInstantiations :: (Fresh m, Applicative m) => Behavior -> InlineCountT m Behavior
-inlineInstantiations b@(Instantiate procname actualGates actualParams) = do
-    tell (counter procname, mempty)
-    inlines <- lift ask
-    return $ maybe b (\ f -> f actualGates actualParams) $ Map.lookup procname inlines
-inlineInstantiations b = descendBehavior inlineInstantiations b
 
 simplify :: Behavior -> Behavior
 simplify = runFreshM . simplify'
