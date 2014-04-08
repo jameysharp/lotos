@@ -8,10 +8,12 @@ module LOTOS.Simplify (
 
 import LOTOS.AST
 import LOTOS.AST.Util
+import LOTOS.Util
 
 import Control.Applicative
 import Control.Arrow
 import Control.Monad
+import Control.Monad.Fix
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.Maybe
 import Control.Monad.Trans.Writer
@@ -24,10 +26,41 @@ import Generics.RepLib
 import Unbound.LocallyNameless hiding (union)
 
 simplifyProcess :: Process -> Process
-simplifyProcess = runFreshM . simplifyProcess'
+simplifyProcess p = runFreshM $ liftM fst $ mfix $ \ ~(_, bodies) -> do
+    let inlineProcess name = Map.findWithDefault (error $ "can't inline " ++ show name ++ " from " ++ show (Map.keys bodies)) name bodies
+    runWriterT $ simplifyProcess' inlineProcess p
 
-simplifyProcess' :: (Fresh m, Applicative m) => Process -> m Process
-simplifyProcess' = transformProcess $ \ formals procs b -> (,,) formals <$> mapM simplifyProcess' procs <*> simplify' b
+type Inliner = [Gate] -> [Expression] -> Behavior
+
+simplifyProcess' :: (Fresh m, Applicative m, MonadFix m) => (Name Process -> Inliner) -> Process -> WriterT (Map.Map (Name Process) Inliner) m Process
+simplifyProcess' inlineProcess p@(Process procname _) = flip transformProcess p $ \ (formalGates, formalParams) procs b -> do
+    simplified <- lift $ simplify' b
+    tell $ Map.singleton procname $ \ actualGates actualParams ->
+        let Just assignGates = mkPerm (map AnyName formalGates) (map AnyName actualGates)
+        in swaps assignGates $ substs (zip formalParams actualParams) simplified
+    procs' <- mapM (simplifyProcess' inlineProcess) procs
+    (b', newprocs) <- lift $ runMemoT $ simplifyParallelInstantiation inlineProcess simplified
+    return ((formalGates, formalParams), Map.elems newprocs ++ procs', b')
+
+type SortedPair a = (a, a)
+
+sortedPair :: Ord a => a -> a -> SortedPair a
+sortedPair a b = if a <= b then (a, b) else (b, a)
+
+simplifyParallelInstantiation :: (Fresh m, Applicative m, MonadFix m) => (Name Process -> Inliner) -> Behavior -> MemoT m (SortedPair (Name Process)) Process Behavior
+simplifyParallelInstantiation inlineProcess (Parallel sync (Instantiate name1 gates1 params1) (Instantiate name2 gates2 params2)) = do
+    (Process name _) <- flip memoM (sortedPair name1 name2) $ \ _ -> do
+        name <- fresh $ s2n $ name2String name1 ++ "_" ++ name2String name2
+        let paramName (Variable name) = name
+        names1 <- mapM (fresh . paramName) params1
+        names2 <- mapM (fresh . paramName) params2
+        let b1 = inlineProcess name1 gates1 $ map Variable names1
+        let b2 = inlineProcess name2 gates2 $ map Variable names2
+        simplified <- lift $ parallelB sync b1 b2
+        b' <- simplifyParallelInstantiation inlineProcess simplified
+        return $ Process name $ Embed $ bind (gates1 `union` gates2, names1 ++ names2) $ bind (rec []) b'
+    return $ Instantiate name (gates1 `union` gates2) (params1 ++ params2)
+simplifyParallelInstantiation inlineProcess b = descendBehavior (simplifyParallelInstantiation inlineProcess) b
 
 simplify :: Behavior -> Behavior
 simplify = runFreshM . simplify'
