@@ -128,14 +128,18 @@ parallelB sync b1 b2 = do
             liftM (fromMaybe $ Parallel sync' l' r') $ runMaybeT $ do
                 (leadl, namesl, choicesl) <- breakGates sync' l'
                 (leadr, namesr, choicesr) <- breakGates sync' r'
-                choices <- lift $ sequence $ Map.elems $ Map.intersectionWithKey (unifyAction sync') choicesl choicesr
-                (after, toMerge) <- case choices of
-                    [] -> return (Stop, [])
-                    [x] -> return x
-                    xs | all (null . snd) xs -> do
-                        after <- lift $ foldM choiceB (fst $ head xs) (map fst $ tail xs)
-                        return (after, [])
-                    _ -> mzero -- FIXME: merge multiple feasible choices
+                (after, toMerge) <- case (choicesl, choicesr) of
+                    (Right choicesl, Right choicesr) -> do
+                        choices <- lift $ sequence $ Map.elems $ Map.intersectionWithKey (unifyAction sync') choicesl choicesr
+                        case choices of
+                            [] -> return (Stop, [])
+                            [x] -> return x
+                            xs | all (null . snd) xs -> do
+                                after <- lift $ foldM choiceB (fst $ head xs) (map fst $ tail xs)
+                                return (after, [])
+                            _ -> mzero -- FIXME: merge multiple feasible choices
+                    (Left p1, Left p2) -> return (Parallel sync' p1 p2, [])
+                    _ -> mzero
                 lift $ do
                     let (mergel, merger) = unzip toMerge
                     let namesl' = namesl \\ mergel
@@ -154,16 +158,17 @@ parallelB sync b1 b2 = do
         rsync = Set.toList $ Set.unions $ map snd r
         simplify_r = simpleGates (rsync \\ lsync) $ map fst r
 
-breakGates :: (Fresh m, MonadPlus m, Applicative m) => [Gate] -> Behavior -> m (Behavior, [Variable], Map.Map Gate (Bind [GateValue] Behavior))
+breakGates :: (Fresh m, MonadPlus m, Applicative m) => [Gate] -> Behavior -> m (Behavior, [Variable], Either Behavior (Map.Map Gate (Bind [GateValue] Behavior)))
 breakGates gs (Action g binding) | g `notElem` gs = do
     (vs, b) <- unbind binding
     (next, names, rest) <- breakGates gs b
-    let names' = Set.toList $ binders vs `Set.intersection` fv (Map.elems rest)
+    let names' = Set.toList $ binders vs `Set.intersection` fv (either (return . bind []) Map.elems rest)
     next' <- insertBeforeExit (\ vs' -> Exit $ map (ExitExpression . Variable) names' ++ vs') names next
     return (Action g $ bind vs next', names' ++ names, rest)
+breakGates _ b@(Instantiate{}) = return (Exit [], [], Left b) -- FIXME: peel off any async gates from the start of the next process
 breakGates gs b = do
     choices <- breakGates' gs b
-    return (Exit [], [], choices)
+    return (Exit [], [], Right choices)
 
 breakGates' :: MonadPlus m => [Gate] -> Behavior -> m (Map.Map Gate (Bind [GateValue] Behavior))
 breakGates' gs (Action g binding) | g `elem` gs = return $ Map.singleton g binding
