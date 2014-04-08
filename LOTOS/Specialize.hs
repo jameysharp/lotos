@@ -66,7 +66,7 @@ specializeInstantiationGates hidden (Instantiate procname gates actuals) = do
 specializeInstantiationGates hidden (Hide binding) = do
     (gs, b) <- unbind binding
     b' <- specializeInstantiationGates (hidden `Set.union` Set.fromList gs) b
-    hideB gs b'
+    lift $ lift $ hideB gs b'
 specializeInstantiationGates hidden b = descendBehavior (specializeInstantiationGates hidden) b
 
 specializeGatesWith :: (Name Process, [Gate], Set.Set Gate) -> SpecializeM Process
@@ -78,7 +78,7 @@ specializeGatesWith (procname, gates, hidden) = do
     Process _ body <- flip transformProcess process $ \ (formalGates, formalParams) [] b -> do
         let Just assign = mkPerm (map AnyName formalGates) (map AnyName gates)
         b' <- specializeInstantiationGates hidden $ swaps assign b
-        simplified <- hideB (Set.toList hidden) b'
+        simplified <- lift $ lift $ hideB (Set.toList hidden) b'
         return (([], formalParams), [], simplified)
     procname' <- fresh $ procname
     return $ Process procname' body
