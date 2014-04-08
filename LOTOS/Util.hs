@@ -1,7 +1,10 @@
 module LOTOS.Util (
-    Counter(), counter, counts
+    Counter(), counter, counts,
+    MemoT, runMemoT, memoM
 ) where
 
+import Control.Monad.Fix
+import Control.Monad.Trans.State
 import qualified Data.Map as Map
 import Data.Monoid
 
@@ -13,3 +16,16 @@ instance Ord k => Monoid (Counter k) where
 
 counter :: k -> Counter k
 counter k = Counter $ Map.singleton k 1
+
+type MemoT m a b = StateT (Map.Map a b) m
+
+runMemoT :: Monad m => MemoT m a b c -> m (c, Map.Map a b)
+runMemoT m = runStateT m Map.empty
+
+memoM :: (MonadFix m, Ord a) => (a -> MemoT m a b b) -> a -> MemoT m a b b
+memoM f k = do
+    seen <- get
+    let compute = mfix $ \ x -> do
+        put $ Map.insert k x seen
+        f k
+    maybe compute return $ Map.lookup k seen

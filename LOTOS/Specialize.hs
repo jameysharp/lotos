@@ -3,11 +3,10 @@ module LOTOS.Specialize (liftProcesses, specializeGates) where
 
 import LOTOS.AST
 import LOTOS.AST.Util
+import LOTOS.Util
 
-import Control.Monad.Fix
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.Reader
-import Control.Monad.Trans.State
 import Control.Monad.Trans.Writer
 import qualified Data.Map as Map
 import Data.Monoid
@@ -53,24 +52,16 @@ specializeGates p = runFreshM $ liftProcessesM p >>= transformProcess f
     where
     f formals procs b = do
         let scope = Map.fromList [ (name, p) | p@(Process name _) <- procs ]
-        (b', procs') <- flip runReaderT scope $ flip runStateT Map.empty $ specializeInstantiationGates b
+        (b', procs') <- flip runReaderT scope $ runMemoT $ specializeInstantiationGates b
         return (formals, Map.elems procs', b')
 
-type SpecializeM a = StateT (Map.Map (Name Process, [Gate]) Process) (ReaderT (Map.Map (Name Process) Process) FreshM) a
+type SpecializeM a = MemoT (ReaderT (Map.Map (Name Process) Process) FreshM) (Name Process, [Gate]) Process a
 
 specializeInstantiationGates :: Behavior -> SpecializeM Behavior
 specializeInstantiationGates (Instantiate procname gates actuals) = do
     Process procname' _ <- memoM specializeGatesWith (procname, gates)
     return $ Instantiate procname' [] actuals
 specializeInstantiationGates b = descendBehavior specializeInstantiationGates b
-
-memoM :: (MonadFix m, Ord a) => (a -> StateT (Map.Map a b) m b) -> a -> StateT (Map.Map a b) m b
-memoM f k = do
-    seen <- get
-    let compute = mfix $ \ x -> do
-        put $ Map.insert k x seen
-        f k
-    maybe compute return $ Map.lookup k seen
 
 specializeGatesWith :: (Name Process, [Gate]) -> SpecializeM Process
 specializeGatesWith (procname, gates) = do
