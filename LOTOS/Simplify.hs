@@ -126,8 +126,8 @@ parallelB sync b1 b2 = do
             l' <- simplify_l
             r' <- simplify_r
             liftM (fromMaybe $ Parallel sync' l' r') $ runMaybeT $ do
-                (leadl, namesl, choicesl) <- breakGates sync' l'
-                (leadr, namesr, choicesr) <- breakGates sync' r'
+                (varsl, leadl, choicesl) <- breakGates sync' l'
+                (varsr, leadr, choicesr) <- breakGates sync' r'
                 (after, toMerge) <- case (choicesl, choicesr) of
                     (Right choicesl, Right choicesr) -> do
                         choices <- lift $ sequence $ Map.elems $ Map.intersectionWithKey (unifyAction sync') choicesl choicesr
@@ -141,15 +141,16 @@ parallelB sync b1 b2 = do
                     (Left p1, Left p2) -> return (Parallel sync' p1 p2, [])
                     _ -> mzero
                 lift $ do
-                    let (mergel, merger) = unzip toMerge
-                    let namesl' = namesl \\ mergel
-                    let namesr' = namesr \\ merger
-                    let exitAnys = map (const ExitAny)
-                    let extractMerges names merges f = Exit . uncurry (++) . (map snd *** f . map snd) . partition ((`elem` merges) . fst) . zip names
-                    leadl' <- insertBeforeExit (extractMerges namesl mergel (++ exitAnys namesr')) namesl leadl
-                    leadr' <- insertBeforeExit (extractMerges namesr merger (exitAnys namesl' ++)) namesr leadr
+                    let (mergenames, mergel, merger) = unzip3 toMerge
+                    let namesFrom vars = Set.toList $ vars `Set.intersection` fv after
+                    let namesl = namesFrom varsl
+                    let namesr = namesFrom varsr
+                    let usevar = map (ExitExpression . Variable)
+                    let anyvar = map (const ExitAny)
+                    let leadl' = leadl $ map ExitExpression mergel ++ usevar namesl ++ anyvar namesr
+                    let leadr' = leadr $ map ExitExpression merger ++ anyvar namesl ++ usevar namesr
                     lead <- interleavingB leadl' leadr'
-                    sequenceB lead (mergel ++ namesl' ++ namesr') after
+                    sequenceB lead (mergenames ++ namesl ++ namesr) after
         where
         simpleGates g branches = emitInterleavings branches >>= impossibleGates g
         sync' = lsync `union` rsync
@@ -158,17 +159,15 @@ parallelB sync b1 b2 = do
         rsync = Set.toList $ Set.unions $ map snd r
         simplify_r = simpleGates (rsync \\ lsync) $ map fst r
 
-breakGates :: [Gate] -> Behavior -> MaybeT FreshM (Behavior, [Variable], Either Behavior (Map.Map Gate (Bind [GateValue] Behavior)))
+breakGates :: [Gate] -> Behavior -> MaybeT FreshM (Set.Set Variable, [ExitExpression] -> Behavior, Either Behavior (Map.Map Gate (Bind [GateValue] Behavior)))
 breakGates gs (Action g binding) | g `notElem` gs = do
     (vs, b) <- unbind binding
-    (next, names, rest) <- breakGates gs b
-    let names' = Set.toList $ binders vs `Set.intersection` fv (either (return . bind []) Map.elems rest)
-    next' <- lift $ insertBeforeExit (\ vs' -> Exit $ map (ExitExpression . Variable) names' ++ vs') names next
-    return (Action g $ bind vs next', names' ++ names, rest)
-breakGates _ b@(Instantiate{}) = return (Exit [], [], Left b) -- FIXME: peel off any async gates from the start of the next process
+    (vars, next, rest) <- breakGates gs b
+    return (binders vs `Set.union` vars, Action g . bind vs . next, rest)
+breakGates _ b@(Instantiate{}) = return (Set.empty, Exit, Left b) -- FIXME: peel off any async gates from the start of the next process
 breakGates gs b = do
     choices <- breakGates' gs b
-    return (Exit [], [], Right choices)
+    return (Set.empty, Exit, Right choices)
 
 breakGates' :: [Gate] -> Behavior -> MaybeT FreshM (Map.Map Gate (Bind [GateValue] Behavior))
 breakGates' gs (Action g binding) | g `elem` gs = return $ Map.singleton g binding
@@ -180,22 +179,24 @@ breakGates' gs (Choice b1 b2) = do
     return $ Map.union choices1 choices2
 breakGates' _ _ = mzero
 
-unifyAction :: [Gate] -> Gate -> Bind [GateValue] Behavior -> Bind [GateValue] Behavior -> FreshM (Behavior, [(Variable, Variable)])
+unifyAction :: [Gate] -> Gate -> Bind [GateValue] Behavior -> Bind [GateValue] Behavior -> FreshM (Behavior, [(Variable, Expression, Expression)])
 unifyAction sync g bindingl bindingr = do
     (vsl, bl) <- unbind bindingl
     (vsr, br) <- unbind bindingr
-    let (unified, toMerge) = runWriter $ zipWithM unifyGateValue vsl vsr
-    let (vsnames, vs) = unzip unified
-    let push decls = substs [(old, Variable new) | (VariableDeclaration old, new) <- zip decls vsnames ]
+    (unified, toMerge) <- runWriterT $ zipWithM unifyGateValue vsl vsr
+    let (vexprs, vs) = unzip unified
+    let push decls = substs [ (old, new) | (VariableDeclaration old, new) <- zip decls vexprs ]
     after <- parallelB sync (push vsl bl) (push vsr br)
     return (Action g $ bind vs after, toMerge)
 
-unifyGateValue :: GateValue -> GateValue -> Writer [(Variable, Variable)] (Variable, GateValue)
--- NOTE: In this first case, name1 and name2 were free in this action, so it's OK for them to escape their binding.
-unifyGateValue v@(ValueDeclaration (Embed (Variable name1))) (ValueDeclaration (Embed (Variable name2))) = writer ((name1, v), [(name1, name2)])
-unifyGateValue v@(ValueDeclaration (Embed (Variable name))) (VariableDeclaration _) = return (name, v)
-unifyGateValue (VariableDeclaration _) v@(ValueDeclaration (Embed (Variable name))) = return (name, v)
-unifyGateValue v@(VariableDeclaration name) (VariableDeclaration _) = return (name, v)
+unifyGateValue :: GateValue -> GateValue -> WriterT [(Variable, Expression, Expression)] FreshM (Expression, GateValue)
+unifyGateValue (ValueDeclaration (Embed expr1@(Variable name1))) (ValueDeclaration (Embed expr2)) = do
+    name <- fresh name1
+    let deadVar = error "LOTOS.Simplify internal error: deadVar was substituted into a Parallel branch"
+    writer ((deadVar, ValueDeclaration $ Embed $ Variable name), [(name, expr1, expr2)])
+unifyGateValue v@(ValueDeclaration (Embed expr)) (VariableDeclaration _) = return (expr, v)
+unifyGateValue (VariableDeclaration _) v@(ValueDeclaration (Embed expr)) = return (expr, v)
+unifyGateValue v@(VariableDeclaration name) (VariableDeclaration _) = return (Variable name, v)
 
 synchronizationB :: Behavior -> Behavior -> FreshM Behavior
 synchronizationB (Exit v1) (Exit v2) | Just merged <- unifyExits v1 v2 = return $ Exit merged
