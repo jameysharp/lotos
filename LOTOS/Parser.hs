@@ -41,6 +41,7 @@ processName = s2n <$> T.identifier lexer <?> "process name"
 expression :: Stream s m Char => ParsecT s u m Expression
 expression =
     Variable <$> variableName
+    <|> IntLiteral . fromIntegral <$> T.integer lexer
     <|> T.parens lexer expression
 
 gateValue :: Stream s m Char => ParsecT s u m GateValue

@@ -13,7 +13,9 @@ import Unbound.LocallyNameless.Ops
 
 type Variable = Name Expression
 
-newtype Expression = Variable Variable
+data Expression
+    = Variable Variable
+    | IntLiteral Int
     deriving Eq
 
 $(derive [''Expression])
@@ -21,9 +23,11 @@ instance Alpha Expression
 
 instance Subst Expression Expression where
     isvar (Variable name) = Just $ SubstName name
+    isvar _ = Nothing
 
 instance Show Expression where
     show (Variable name) = show name
+    show (IntLiteral val) = show val
 
 data ExitExpression = ExitExpression Expression | ExitAny
     deriving Eq

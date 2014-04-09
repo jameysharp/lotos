@@ -52,6 +52,7 @@ simplifyParallelInstantiation inlineProcess (Parallel sync (Instantiate name1 ga
     (Process name _) <- flip memoM (sortedPair name1 name2) $ \ _ -> do
         name <- fresh $ s2n $ name2String name1 ++ "_" ++ name2String name2
         let paramName (Variable name) = name
+            paramName _ = s2n "x"
         names1 <- mapM (fresh . paramName) params1
         names2 <- mapM (fresh . paramName) params2
         let b1 = inlineProcess name1 gates1 $ map Variable names1
@@ -94,6 +95,7 @@ sequenceB b1 names (Exit vs) = replaceExit b1
     where
     replaceExit (Exit vs') =
         let rewrite (Variable var) = lookup var (zip names vs')
+            rewrite (IntLiteral _) = Nothing
             rebind (ExitExpression expr) | Just expr' <- rewrite expr = expr'
             rebind e = e
         in return $ Exit $ map rebind vs
@@ -190,8 +192,11 @@ unifyAction sync g bindingl bindingr = do
     return (Action g $ bind vs after, toMerge)
 
 unifyGateValue :: GateValue -> GateValue -> WriterT [(Variable, Expression, Expression)] FreshM (Expression, GateValue)
-unifyGateValue (ValueDeclaration (Embed expr1@(Variable name1))) (ValueDeclaration (Embed expr2)) = do
-    name <- fresh name1
+unifyGateValue (ValueDeclaration (Embed expr1)) (ValueDeclaration (Embed expr2)) = do
+    name <- fresh $ case (expr1, expr2) of
+        (Variable name, _) -> name
+        (_, Variable name) -> name
+        _ -> s2n "merge"
     let deadVar = error "LOTOS.Simplify internal error: deadVar was substituted into a Parallel branch"
     writer ((deadVar, ValueDeclaration $ Embed $ Variable name), [(name, expr1, expr2)])
 unifyGateValue v@(ValueDeclaration (Embed expr)) (VariableDeclaration _) = return (expr, v)
