@@ -34,7 +34,7 @@ library
 
 executable lotos-eater
   main-is:             lotos-eater.hs
-  ghc-options:         -Wall -fno-warn-name-shadowing
+  ghc-options:         -Wall -Werror -fno-warn-name-shadowing
   build-depends:       base ==4.6.*,
                        containers ==0.5.*,
                        parsec ==3.1.*,
