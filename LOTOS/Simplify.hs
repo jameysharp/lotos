@@ -22,7 +22,6 @@ import Data.List
 import qualified Data.Map as Map
 import Data.Maybe
 import qualified Data.Set as Set
-import Generics.RepLib
 import Unbound.LocallyNameless hiding (union)
 
 simplifyProcess :: Process -> Process
@@ -209,9 +208,8 @@ synchronizationB b1 b2 = parallelB (Set.toList $ fv b1 `Set.union` fv b2) b1 b2
 interleavingB :: Behavior -> Behavior -> FreshM Behavior
 interleavingB Stop b = insertBeforeExit (const Stop) [] b
 interleavingB a Stop = insertBeforeExit (const Stop) [] a
--- XXX: Not clearly correct if subtree contains process instantiation.
-interleavingB (Exit vs) b | Just merged <- everywhereM (mkM $ unifyExits vs) b = return merged
-interleavingB a (Exit vs) | Just merged <- everywhereM (mkM $ unifyExits vs) a = return merged
+interleavingB b1@(Exit vs) b2 = liftM (fromMaybe $ Interleaving b1 b2) $ runMaybeT $ unifyExits vs b2
+interleavingB b1 b2@(Exit vs) = liftM (fromMaybe $ Interleaving b1 b2) $ runMaybeT $ unifyExits vs b1
 interleavingB b1 b2 = return $ Interleaving b1 b2
 
 hideB :: [Gate] -> Behavior -> FreshM Behavior
@@ -274,12 +272,20 @@ insertBeforeExit f results (Sequence lhs binding) = do
     Sequence lhs <$> (bind names <$> insertBeforeExit f results rhs)
 insertBeforeExit f results b = descendBehavior (insertBeforeExit f results) b
 
-unifyExits :: [ExitExpression] -> [ExitExpression] -> Maybe [ExitExpression]
-unifyExits v1 v2 = sequence $ zipWith exitMerge v1 v2
+unifyExits :: [ExitExpression] -> Behavior -> MaybeT FreshM Behavior
+unifyExits v1 b | all (ExitAny ==) v1 = return b
+unifyExits v1 (Exit v2) = liftM Exit $ zipWithM exitMerge v1 v2
     where
-    exitMerge ExitAny b = Just b
-    exitMerge a ExitAny = Just a
-    exitMerge _ _ = Nothing
+    exitMerge ExitAny b = return b
+    exitMerge a ExitAny = return a
+    exitMerge _ _ = mzero
+unifyExits _ (Instantiate{}) = mzero -- TODO: simplify in the presence of process instantiation
+unifyExits v1 (Sequence b1 binding) = do
+    -- don't unify with Exit nodes on the LHS of a Sequence
+    (names, b2) <- unbind binding
+    b2' <- unifyExits v1 b2
+    return $ Sequence b1 $ bind names b2'
+unifyExits v1 b2 = descendBehavior (unifyExits v1) b2
 
 gatesFreeIn :: Set.Set Gate -> Behavior -> Set.Set Gate
 gatesFreeIn gates b = gates `Set.intersection` fv b
