@@ -204,8 +204,7 @@ unifyGateValue (VariableDeclaration _) v@(ValueDeclaration (Embed expr)) = retur
 unifyGateValue v@(VariableDeclaration name) (VariableDeclaration _) = return (Variable name, v)
 
 synchronizationB :: Behavior -> Behavior -> FreshM Behavior
-synchronizationB (Exit v1) (Exit v2) | Just merged <- unifyExits v1 v2 = return $ Exit merged
-synchronizationB b1 b2 = return $ Synchronization b1 b2
+synchronizationB b1 b2 = parallelB (Set.toList $ fv b1 `Set.union` fv b2) b1 b2
 
 interleavingB :: Behavior -> Behavior -> FreshM Behavior
 interleavingB Stop b = insertBeforeExit (const Stop) [] b
