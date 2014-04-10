@@ -20,7 +20,6 @@ import Control.Monad.Trans.Writer
 import Data.Function
 import Data.List
 import qualified Data.Map as Map
-import Data.Maybe
 import qualified Data.Set as Set
 import Unbound.LocallyNameless hiding (union)
 
@@ -126,7 +125,7 @@ parallelB sync b1 b2 = do
         _ -> do
             l' <- simplify_l
             r' <- simplify_r
-            liftM (fromMaybe $ Parallel sync' l' r') $ runMaybeT $ do
+            fromMaybeT (Parallel sync' l' r') $ do
                 (varsl, leadl, choicesl) <- breakGates sync' l'
                 (varsr, leadr, choicesr) <- breakGates sync' r'
                 (after, toMerge) <- case (choicesl, choicesr) of
@@ -208,8 +207,8 @@ synchronizationB b1 b2 = parallelB (Set.toList $ fv b1 `Set.union` fv b2) b1 b2
 interleavingB :: Behavior -> Behavior -> FreshM Behavior
 interleavingB Stop b = insertBeforeExit (const Stop) [] b
 interleavingB a Stop = insertBeforeExit (const Stop) [] a
-interleavingB b1@(Exit vs) b2 = liftM (fromMaybe $ Interleaving b1 b2) $ runMaybeT $ unifyExits vs b2
-interleavingB b1 b2@(Exit vs) = liftM (fromMaybe $ Interleaving b1 b2) $ runMaybeT $ unifyExits vs b1
+interleavingB b1@(Exit vs) b2 = fromMaybeT (Interleaving b1 b2) $ unifyExits vs b2
+interleavingB b1 b2@(Exit vs) = fromMaybeT (Interleaving b1 b2) $ unifyExits vs b1
 interleavingB b1 b2 = return $ Interleaving b1 b2
 
 hideB :: [Gate] -> Behavior -> FreshM Behavior

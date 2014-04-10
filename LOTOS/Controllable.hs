@@ -4,6 +4,7 @@ module LOTOS.Controllable (uncontrolled) where
 import LOTOS.AST
 import LOTOS.AST.Util
 import LOTOS.Simplify
+import LOTOS.Util
 
 import Control.Monad
 import Control.Monad.Trans.Class
@@ -16,7 +17,7 @@ import Generics.RepLib
 import Unbound.LocallyNameless
 
 uncontrolled :: [Gate] -> Behavior -> Behavior
-uncontrolled gates b = fromMaybe b $ runFreshM $ runMaybeT $ uncontrolled' gates b
+uncontrolled gates b = runFreshM $ fromMaybeT b $ uncontrolled' gates b
 
 uncontrolled' :: [Gate] -> Behavior -> MaybeT FreshM Behavior
 uncontrolled' gates b = MaybeT $ do

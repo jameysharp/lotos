@@ -1,12 +1,19 @@
 module LOTOS.Util (
+    fromMaybeT,
     Counter(), counter, counts,
     MemoT, runMemoT, memoM
 ) where
 
+import Control.Monad
 import Control.Monad.Fix
+import Control.Monad.Trans.Maybe
 import Control.Monad.Trans.State
 import qualified Data.Map as Map
+import Data.Maybe
 import Data.Monoid
+
+fromMaybeT :: Monad m => a -> MaybeT m a -> m a
+fromMaybeT def = liftM (fromMaybe def) . runMaybeT
 
 newtype Counter k = Counter { counts :: Map.Map k Int }
 
