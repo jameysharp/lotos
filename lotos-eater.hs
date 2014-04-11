@@ -10,6 +10,7 @@ import Control.Monad
 import Data.List
 import qualified Data.Map as Map
 import System.Environment
+import Language.C
 import Unbound.LocallyNameless hiding (union)
 import Unbound.LocallyNameless.Ops
 
@@ -64,4 +65,4 @@ main = do
     putStrLn ""
 
     putStrLn "Imperative equivalent:"
-    print $ codegen (map s2n uncontrolled_gates) simplified
+    print $ pretty $ codegen (map s2n uncontrolled_gates) simplified
