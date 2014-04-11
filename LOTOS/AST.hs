@@ -8,8 +8,9 @@ module LOTOS.AST where
 
 import Data.List
 import Generics.RepLib
-import Unbound.LocallyNameless
+import Unbound.LocallyNameless hiding (empty)
 import Unbound.LocallyNameless.Ops
+import Text.PrettyPrint
 
 type Variable = Name Expression
 
@@ -71,38 +72,53 @@ data Behavior
 instance Alpha Behavior
 instance Subst Expression Behavior
 
-instance Show Behavior where
-    show Stop = "stop"
-    show (Action g binding) = let (vs, b) = unsafeUnbind binding in unwords (show g : map show vs) ++ "; " ++ show b
-    show (Choice b1 b2) = "(" ++ show b1 ++ ") [] (" ++ show b2 ++ ")"
-    show (Parallel gs b1 b2) = "(" ++ show b1 ++ ") |[" ++ intercalate ", " (map show gs) ++ "]| (" ++ show b2 ++ ")"
-    show (Interleaving b1 b2) = "(" ++ show b1 ++ ") ||| (" ++ show b2 ++ ")"
-    show (Synchronization b1 b2) = "(" ++ show b1 ++ ") || (" ++ show b2 ++ ")"
-    show (Hide binding) = let (gs, b) = unsafeUnbind binding in unwords ("hide" : [intercalate ", " (map show gs), "in", "(" ++ show b ++ ")"])
-    show (Instantiate name gates params) =
-        let gateStr = if null gates then "" else " " ++ "[" ++ intercalate ", " (map show gates) ++ "]"
-            paramStr = if null params then "" else " " ++ "(" ++ intercalate ", " (map show params) ++ ")"
-        in show name ++ gateStr ++ paramStr
-    show (Exit []) = "exit"
-    show (Exit gs) = "exit(" ++ intercalate ", " (map show gs) ++ ")"
-    show (Sequence b1 binding) = let (accept, b2) = unsafeUnbind binding in "(" ++ show b1 ++ ") >> " ++
-        case accept of
-        [] -> "(" ++ show b2 ++ ")"
-        _ -> unwords ("accept" : [intercalate ", " $ map show accept, "in", "(" ++ show b2 ++ ")"])
-    show (Preempt b1 b2) = "(" ++ show b1 ++ ") [> (" ++ show b2 ++ ")"
-
 data Process = Process (Name Process) (Embed (Bind ([Gate], [Variable]) (Bind (Rec [Process]) Behavior)))
 
 $(derive [''Behavior, ''Process])
 instance Alpha Process
 instance Subst Expression Process
 
+prettyBehavior :: Behavior -> Doc
+prettyBehavior Stop = text "stop"
+prettyBehavior b@(Action{}) = sep $ go b
+    where
+    go (Action g binding) = let (vs, b) = unsafeUnbind binding in (hsep (text (show g) : map (text . show) vs) <> semi) : go b
+    go b = [prettyBehavior b]
+prettyBehavior (Choice b1 b2) = parens $ nest 4 $ sep $ intersperse (text "[]") $ map prettyBehavior $ go $ Choice b1 b2
+    where
+    go (Choice b1 b2) = go b1 ++ go b2
+    go b = [b]
+prettyBehavior (Parallel gs b1 b2) = parens $ nest 4 $ sep [prettyBehavior b1, op, prettyBehavior b2]
+    where op = text "|[" <> sep (punctuate (text ",") (map (text . show) gs)) <> text "]|"
+prettyBehavior (Interleaving b1 b2) = parens $ nest 4 $ sep [prettyBehavior b1, text "|||", prettyBehavior b2]
+prettyBehavior (Synchronization b1 b2) = parens $ nest 4 $ sep [prettyBehavior b1, text "||", prettyBehavior b2]
+prettyBehavior (Hide binding) = hang op 4 $ prettyBehavior b
+    where
+    (gs, b) = unsafeUnbind binding
+    op = text "hide" <+> sep (punctuate (text ",") (map (text . show) gs)) <+> text "in"
+prettyBehavior (Instantiate name gates params) = text (show name) <+> gatesDoc <+> paramsDoc
+    where
+    gatesDoc = if null gates then empty else brackets (sep $ punctuate (text ",") (map (text . show) gates))
+    paramsDoc = if null params then empty else parens (sep $ punctuate (text ",") (map (text . show) params))
+prettyBehavior (Exit vs) = text "exit" <> if null vs then empty else parens (sep $ punctuate (text ",") (map (text . show) vs))
+prettyBehavior (Sequence b1 binding) = let (names, b2) = unsafeUnbind binding in parens $ nest 4 $ sep [prettyBehavior b1, text ">>" <+> op names, prettyBehavior b2]
+    where
+    op [] = empty
+    op names = text "accept" <+> sep (punctuate (text ",") (map (text . show) names)) <+> text "in"
+prettyBehavior (Preempt b1 b2) = parens $ nest 4 $ sep [prettyBehavior b1, text "[>", prettyBehavior b2]
+
+instance Show Behavior where
+    show = show . prettyBehavior
+
+prettyProcess :: Process -> Doc
+prettyProcess (Process procname (Embed binding)) =
+    let ((gates, params), binding') = unsafeUnbind binding
+        (recProcs, b) = unsafeUnbind binding'
+        procs = unrec recProcs
+        gatesDoc = if null gates then empty else brackets $ sep $ punctuate (text ",") (map (text . show) gates)
+        paramsDoc = if null params then empty else parens $ sep $ punctuate (text ",") (map (text . show) params)
+        procDocs = if null procs then [] else text "where" : map (nest 4 . prettyProcess) procs
+    in sep $ [text "process" <+> text (show procname) <+> gatesDoc <+> paramsDoc <+> text ":=", nest 4 $ prettyBehavior b] ++ procDocs ++ [text "endproc"]
+
 instance Show Process where
-    show (Process procname (Embed binding)) =
-        let ((gates, params), binding') = unsafeUnbind binding
-            (recProcs, b) = unsafeUnbind binding'
-            procs = unrec recProcs
-            gateStr = if null gates then "" else " [" ++ intercalate ", " (map show gates) ++ "]"
-            paramStr = if null params then "" else " (" ++ intercalate ", " (map show params) ++ ")"
-            procStr = if null procs then "" else unwords $ " where" : map show procs
-        in "process " ++ show procname ++ gateStr ++ paramStr ++ " := " ++ show b ++ procStr ++ " endproc"
+    show = show . prettyProcess

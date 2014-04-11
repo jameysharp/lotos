@@ -28,6 +28,7 @@ library
                        containers ==0.5.*,
                        language-c ==0.4.*,
                        parsec ==3.1.*,
+                       pretty ==1.1.*,
                        RepLib ==0.5.*,
                        transformers ==0.3.*,
                        unbound ==0.4.*
@@ -39,6 +40,7 @@ executable lotos-eater
                        containers ==0.5.*,
                        language-c ==0.4.*,
                        parsec ==3.1.*,
+                       pretty ==1.1.*,
                        RepLib ==0.5.*,
                        transformers ==0.3.*,
                        unbound ==0.4.*
