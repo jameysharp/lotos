@@ -15,7 +15,7 @@ import Unbound.LocallyNameless.Ops
 data Procedure = Procedure (Name Procedure) (Bind [Variable] Statement)
 
 instance Show Procedure where
-    show (Procedure name binding) = let (formals, body) = unsafeUnbind binding in "function " ++ show name ++ "(" ++ unwords (map show formals) ++ ") { " ++ show body ++ "}"
+    show (Procedure name binding) = let (formals, body) = unsafeUnbind binding in "function " ++ show name ++ "(" ++ intercalate ", " (map show formals) ++ ") { " ++ show body ++ "}"
 
 data Statement
     = Call Gate (Bind [GateValue] Statement)
